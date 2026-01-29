@@ -1,0 +1,112 @@
+import { vi } from 'vitest';
+import { PublicKey, Connection, Transaction, VersionedTransaction } from '@solana/web3.js';
+
+/**
+ * Mock Connection class for testing RPC behavior
+ */
+export function createMockConnection(overrides: Partial<Connection> = {}): Connection {
+  const mockConnection = {
+    getSlot: vi.fn().mockResolvedValue(12345),
+    getLatestBlockhash: vi.fn().mockResolvedValue({
+      blockhash: 'mockBlockhash123456789',
+      lastValidBlockHeight: 100000,
+    }),
+    getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
+    simulateTransaction: vi.fn().mockResolvedValue({
+      value: {
+        err: null,
+        logs: ['Log: success'],
+      },
+    }),
+    sendRawTransaction: vi.fn().mockResolvedValue('mockSignature123456789'),
+    getSignatureStatus: vi.fn().mockResolvedValue({
+      value: {
+        confirmationStatus: 'confirmed',
+        err: null,
+      },
+    }),
+    confirmTransaction: vi.fn().mockResolvedValue({
+      value: { err: null },
+    }),
+    ...overrides,
+  };
+
+  return mockConnection as unknown as Connection;
+}
+
+/**
+ * Create a mock connection that fails on first N attempts then succeeds
+ */
+export function createFailingMockConnection(
+  failCount: number,
+  errorMessage: string = 'Connection failed'
+): Connection {
+  let attempts = 0;
+  
+  return {
+    getSlot: vi.fn().mockImplementation(() => {
+      attempts++;
+      if (attempts <= failCount) {
+        return Promise.reject(new Error(errorMessage));
+      }
+      return Promise.resolve(12345);
+    }),
+    getLatestBlockhash: vi.fn().mockResolvedValue({
+      blockhash: 'mockBlockhash123456789',
+      lastValidBlockHeight: 100000,
+    }),
+    getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
+    simulateTransaction: vi.fn().mockResolvedValue({
+      value: { err: null, logs: [] },
+    }),
+    sendRawTransaction: vi.fn().mockResolvedValue('mockSignature123456789'),
+    getSignatureStatus: vi.fn().mockResolvedValue({
+      value: { confirmationStatus: 'confirmed', err: null },
+    }),
+  } as unknown as Connection;
+}
+
+/**
+ * Create a mock connection that simulates rate limiting
+ */
+export function createRateLimitedMockConnection(rateLimitUntilAttempt: number): Connection {
+  let attempts = 0;
+  
+  return {
+    getSlot: vi.fn().mockImplementation(() => {
+      attempts++;
+      if (attempts <= rateLimitUntilAttempt) {
+        const error = new Error('Too many requests - 429');
+        (error as any).statusCode = 429;
+        return Promise.reject(error);
+      }
+      return Promise.resolve(12345);
+    }),
+    getLatestBlockhash: vi.fn().mockResolvedValue({
+      blockhash: 'mockBlockhash123456789',
+      lastValidBlockHeight: 100000,
+    }),
+  } as unknown as Connection;
+}
+
+/**
+ * Create a mock connection that simulates node failure
+ */
+export function createNodeFailureMockConnection(): Connection {
+  return {
+    getSlot: vi.fn().mockRejectedValue(new Error('fetch failed')),
+    getLatestBlockhash: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+    sendRawTransaction: vi.fn().mockRejectedValue(new Error('503 Service Unavailable')),
+  } as unknown as Connection;
+}
+
+/**
+ * Reset all mocks on a mock connection
+ */
+export function resetConnectionMocks(connection: Connection): void {
+  Object.values(connection).forEach((value) => {
+    if (typeof value === 'function' && 'mockClear' in value) {
+      (value as any).mockClear();
+    }
+  });
+}
