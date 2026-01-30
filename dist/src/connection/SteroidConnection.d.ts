@@ -5,6 +5,9 @@ import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.
  * transparently when a failover occurs.
  */
 export declare class SteroidConnection {
+    private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS;
+    private static readonly MAX_BACKOFF_DELAY_MS;
+    private static readonly JITTER_MS;
     private activeConnection;
     private urls;
     private currentUrlIndex;
@@ -57,6 +60,10 @@ export declare class SteroidConnection {
      * Perform health checks on all RPC endpoints.
      */
     private performHealthCheck;
+    /**
+     * Internal helper to check the health of a single RPC node.
+     */
+    private checkNodeHealth;
     private startHealthChecks;
     /**
      * Clean up resources when done.

@@ -7,6 +7,10 @@ import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.
  * transparently when a failover occurs.
  */
 export class SteroidConnection {
+  private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
+  private static readonly MAX_BACKOFF_DELAY_MS = 10000;
+  private static readonly JITTER_MS = 100;
+
   private activeConnection: Connection;
   private urls: string[];
   private currentUrlIndex: number = 0;
@@ -76,7 +80,12 @@ export class SteroidConnection {
 
     for (let attempt = 0; attempt < this.steroidConfig.maxRetries; attempt++) {
       try {
-        const result = await this.callWithTimeout(method, args);
+        const result = await this.callWithTimeout(
+          method, 
+          args, 
+          this.activeConnection, 
+          this.steroidConfig.requestTimeout
+        );
         this.updateHealthStatus(this.getActiveEndpoint(), true);
         return result;
       } catch (error: any) {
@@ -98,11 +107,16 @@ export class SteroidConnection {
   /**
    * Internal helper to execute a method with a promise-based timeout.
    */
-  private async callWithTimeout(method: Function, args: any[]): Promise<any> {
+  private async callWithTimeout(
+    method: Function, 
+    args: any[], 
+    target: any, 
+    timeoutMs: number
+  ): Promise<any> {
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Request timeout')), this.steroidConfig.requestTimeout)
+      setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
     );
-    return Promise.race([method.apply(this.activeConnection, args), timeoutPromise]);
+    return Promise.race([method.apply(target, args), timeoutPromise]);
   }
 
   /**
@@ -230,8 +244,8 @@ export class SteroidConnection {
   private calculateBackoff(attempt: number): number {
     const baseDelay = this.steroidConfig.retryDelay;
     const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
-    const jitter = Math.random() * 100;
-    return Math.min(exponentialDelay + jitter, 10000); // Cap at 10 seconds
+    const jitter = Math.random() * SteroidConnection.JITTER_MS;
+    return Math.min(exponentialDelay + jitter, SteroidConnection.MAX_BACKOFF_DELAY_MS);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -277,25 +291,33 @@ export class SteroidConnection {
    * Perform health checks on all RPC endpoints.
    */
   private async performHealthCheck(): Promise<void> {
-    const checks = this.urls.map(async (url) => {
-      const startTime = Date.now();
-      try {
-        const tempConn = new Connection(url, { commitment: 'confirmed' });
-        await Promise.race([
-          tempConn.getSlot(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 5000))
-        ]);
-        
-        const latency = Date.now() - startTime;
-        this.updateHealthStatus(url, true, latency);
-        this.log('info', `Health check passed for ${url} (${latency}ms)`);
-      } catch (error: any) {
-        this.updateHealthStatus(url, false);
-        this.log('warn', `Health check failed for ${url}:`, error.message);
-      }
-    });
-
+    const checks = this.urls.map((url) => this.checkNodeHealth(url));
     await Promise.allSettled(checks);
+  }
+
+  /**
+   * Internal helper to check the health of a single RPC node.
+   */
+  private async checkNodeHealth(url: string): Promise<void> {
+    const startTime = Date.now();
+    try {
+      const tempConn = new Connection(url, { commitment: 'confirmed' });
+      
+      // We use getSlot as a lightweight "ping"
+      await this.callWithTimeout(
+        tempConn.getSlot,
+        [],
+        tempConn,
+        SteroidConnection.DEFAULT_HEALTH_CHECK_TIMEOUT_MS
+      );
+      
+      const latency = Date.now() - startTime;
+      this.updateHealthStatus(url, true, latency);
+      this.log('info', `Health check passed for ${url} (${latency}ms)`);
+    } catch (error: any) {
+      this.updateHealthStatus(url, false);
+      this.log('warn', `Health check failed for ${url}:`, error.message);
+    }
   }
 
   private startHealthChecks(): void {

@@ -5,6 +5,9 @@ import { Connection } from '@solana/web3.js';
  * transparently when a failover occurs.
  */
 export class SteroidConnection {
+    static DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
+    static MAX_BACKOFF_DELAY_MS = 10000;
+    static JITTER_MS = 100;
     activeConnection;
     urls;
     currentUrlIndex = 0;
@@ -62,7 +65,7 @@ export class SteroidConnection {
         let lastError;
         for (let attempt = 0; attempt < this.steroidConfig.maxRetries; attempt++) {
             try {
-                const result = await this.callWithTimeout(method, args);
+                const result = await this.callWithTimeout(method, args, this.activeConnection, this.steroidConfig.requestTimeout);
                 this.updateHealthStatus(this.getActiveEndpoint(), true);
                 return result;
             }
@@ -81,9 +84,9 @@ export class SteroidConnection {
     /**
      * Internal helper to execute a method with a promise-based timeout.
      */
-    async callWithTimeout(method, args) {
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), this.steroidConfig.requestTimeout));
-        return Promise.race([method.apply(this.activeConnection, args), timeoutPromise]);
+    async callWithTimeout(method, args, target, timeoutMs) {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeoutMs));
+        return Promise.race([method.apply(target, args), timeoutPromise]);
     }
     /**
      * Updates health status for a specific URL.
@@ -190,8 +193,8 @@ export class SteroidConnection {
     calculateBackoff(attempt) {
         const baseDelay = this.steroidConfig.retryDelay;
         const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
-        const jitter = Math.random() * 100;
-        return Math.min(exponentialDelay + jitter, 10000); // Cap at 10 seconds
+        const jitter = Math.random() * SteroidConnection.JITTER_MS;
+        return Math.min(exponentialDelay + jitter, SteroidConnection.MAX_BACKOFF_DELAY_MS);
     }
     sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
@@ -231,24 +234,26 @@ export class SteroidConnection {
      * Perform health checks on all RPC endpoints.
      */
     async performHealthCheck() {
-        const checks = this.urls.map(async (url) => {
-            const startTime = Date.now();
-            try {
-                const tempConn = new Connection(url, { commitment: 'confirmed' });
-                await Promise.race([
-                    tempConn.getSlot(),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 5000))
-                ]);
-                const latency = Date.now() - startTime;
-                this.updateHealthStatus(url, true, latency);
-                this.log('info', `Health check passed for ${url} (${latency}ms)`);
-            }
-            catch (error) {
-                this.updateHealthStatus(url, false);
-                this.log('warn', `Health check failed for ${url}:`, error.message);
-            }
-        });
+        const checks = this.urls.map((url) => this.checkNodeHealth(url));
         await Promise.allSettled(checks);
+    }
+    /**
+     * Internal helper to check the health of a single RPC node.
+     */
+    async checkNodeHealth(url) {
+        const startTime = Date.now();
+        try {
+            const tempConn = new Connection(url, { commitment: 'confirmed' });
+            // We use getSlot as a lightweight "ping"
+            await this.callWithTimeout(tempConn.getSlot, [], tempConn, SteroidConnection.DEFAULT_HEALTH_CHECK_TIMEOUT_MS);
+            const latency = Date.now() - startTime;
+            this.updateHealthStatus(url, true, latency);
+            this.log('info', `Health check passed for ${url} (${latency}ms)`);
+        }
+        catch (error) {
+            this.updateHealthStatus(url, false);
+            this.log('warn', `Health check failed for ${url}:`, error.message);
+        }
     }
     startHealthChecks() {
         this.healthCheckTimer = setInterval(() => {
