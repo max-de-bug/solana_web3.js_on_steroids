@@ -63,52 +63,60 @@ export class SteroidConnection {
         const attemptedUrls = new Set();
         while (attempt < this.steroidConfig.maxRetries) {
             try {
-                // Add timeout wrapper
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), this.steroidConfig.requestTimeout));
-                const methodPromise = method.apply(this.activeConnection, args);
-                const result = await Promise.race([methodPromise, timeoutPromise]);
-                // Mark current URL as healthy on success
-                const currentUrl = this.urls[this.currentUrlIndex];
-                const health = this.healthStatus.get(currentUrl);
-                if (health) {
-                    health.healthy = true;
-                    health.lastChecked = Date.now();
-                }
+                const result = await Promise.race([
+                    method.apply(this.activeConnection, args),
+                    timeoutPromise
+                ]);
+                this.updateHealthStatus(this.urls[this.currentUrlIndex], true);
                 return result;
             }
             catch (error) {
                 lastError = error;
                 attemptedUrls.add(this.currentUrlIndex);
-                this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, error.message);
-                // Check if this is a transient error (rate limit, temporary issue)
-                if (this.isTransientError(error)) {
+                this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
+                if (await this.handleExecutionError(lastError, methodName, attempt, attemptedUrls)) {
                     attempt++;
-                    const delay = this.calculateBackoff(attempt);
-                    this.log('info', `Retrying after ${delay}ms due to transient error`);
-                    await this.sleep(delay);
                     continue;
                 }
-                // Check if this is a node failure
-                if (this.isNodeFailure(error)) {
-                    // Mark current node as unhealthy
-                    const currentUrl = this.urls[this.currentUrlIndex];
-                    const health = this.healthStatus.get(currentUrl);
-                    if (health) {
-                        health.healthy = false;
-                        health.lastChecked = Date.now();
-                    }
-                    // Try to switch to next RPC if we have fallbacks and haven't tried all URLs
-                    if (this.urls.length > 1 && attemptedUrls.size < this.urls.length) {
-                        this.switchToNextRpc();
-                        attempt++; // Count as an attempt
-                        continue;
-                    }
-                }
-                // If it's a non-retryable error or we've exhausted options, throw
-                throw this.enhanceError(error, methodName, attempt);
+                throw this.enhanceError(lastError, methodName, attempt);
             }
         }
         throw this.enhanceError(lastError, methodName, this.steroidConfig.maxRetries);
+    }
+    /**
+     * Updates health status for a specific URL.
+     */
+    updateHealthStatus(url, healthy, latency) {
+        const health = this.healthStatus.get(url);
+        if (health) {
+            health.healthy = healthy;
+            health.lastChecked = Date.now();
+            if (latency !== undefined)
+                health.latency = latency;
+        }
+    }
+    /**
+     * Decides whether to retry or failover based on the error.
+     * @returns true if the loop should continue (retry or failover), false if it should throw.
+     */
+    async handleExecutionError(error, methodName, attempt, attemptedUrls) {
+        // 1. Transient Error (Rate limit, etc.) -> Just retry
+        if (this.isTransientError(error)) {
+            const delay = this.calculateBackoff(attempt + 1);
+            this.log('info', `Retrying after ${delay}ms due to transient error`);
+            await this.sleep(delay);
+            return true;
+        }
+        // 2. Node Failure -> Mark unhealthy and try next if available
+        if (this.isNodeFailure(error)) {
+            this.updateHealthStatus(this.urls[this.currentUrlIndex], false);
+            if (this.urls.length > 1 && attemptedUrls.size < this.urls.length) {
+                this.switchToNextRpc();
+                return true;
+            }
+        }
+        return false;
     }
     isTransientError(error) {
         const message = error.message?.toLowerCase() || '';
@@ -209,20 +217,11 @@ export class SteroidConnection {
                     new Promise((_, reject) => setTimeout(() => reject(new Error('Health check timeout')), 5000))
                 ]);
                 const latency = Date.now() - startTime;
-                this.healthStatus.set(url, {
-                    url,
-                    healthy: true,
-                    lastChecked: Date.now(),
-                    latency,
-                });
+                this.updateHealthStatus(url, true, latency);
                 this.log('info', `Health check passed for ${url} (${latency}ms)`);
             }
             catch (error) {
-                this.healthStatus.set(url, {
-                    url,
-                    healthy: false,
-                    lastChecked: Date.now(),
-                });
+                this.updateHealthStatus(url, false);
                 this.log('warn', `Health check failed for ${url}:`, error.message);
             }
         });

@@ -1,6 +1,7 @@
 import { SteroidConnection } from '../connection/SteroidConnection.js';
 import { SteroidWallet } from '../wallet/SteroidWallet.js';
 import { SteroidTransaction } from '../transaction/SteroidTransaction.js';
+import { DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
  *
@@ -24,15 +25,16 @@ export class SteroidClient {
     constructor(endpoint, config = {}) {
         this.config = config;
         // Initialize resilient connection
-        const primary = Array.isArray(endpoint) ? endpoint[0] : endpoint;
-        const additionalFallbacks = Array.isArray(endpoint) ? endpoint.slice(1) : [];
+        const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint];
+        const [primary, ...additionalFallbacks] = endpoints;
         const connectionConfig = {
-            enableLogging: config.enableLogging ?? false,
+            ...DEFAULT_CONFIG.CONNECTION,
             ...config.connection,
-            fallbacks: [...(config.connection?.fallbacks || []), ...additionalFallbacks],
-            retryDelay: config.connection?.retryDelay ?? 500,
-            healthCheckInterval: config.connection?.healthCheckInterval ?? 30000,
-            requestTimeout: config.connection?.requestTimeout ?? 30000,
+            fallbacks: [
+                ...(config.connection?.fallbacks || []),
+                ...additionalFallbacks
+            ],
+            enableLogging: config.enableLogging ?? config.connection?.enableLogging ?? DEFAULT_CONFIG.CONNECTION.enableLogging,
         };
         this.connection = new SteroidConnection(primary, connectionConfig);
         // Initialize transaction engine

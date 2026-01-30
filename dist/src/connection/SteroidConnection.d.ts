@@ -19,6 +19,15 @@ export declare class SteroidConnection {
      * Executes a connection method with intelligent retries and failover.
      */
     private executeWithResilience;
+    /**
+     * Updates health status for a specific URL.
+     */
+    private updateHealthStatus;
+    /**
+     * Decides whether to retry or failover based on the error.
+     * @returns true if the loop should continue (retry or failover), false if it should throw.
+     */
+    private handleExecutionError;
     private isTransientError;
     private isNodeFailure;
     private switchToNextRpc;
