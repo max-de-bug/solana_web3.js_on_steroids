@@ -1,5 +1,5 @@
 import { Connection, TransactionExpiredBlockheightExceededError, } from '@solana/web3.js';
-import { TransactionState } from '../types/SteroidWalletTypes.js';
+import { TransactionState, DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
 /**
  * Enhanced transaction handling with state management, automatic retries,
  * blockhash refresh, and multi-node confirmation.
@@ -15,7 +15,13 @@ export class SteroidTransaction {
      * Includes automatic blockhash refresh and comprehensive error handling.
      */
     async sendAndConfirm(transaction, options = {}) {
-        const { timeoutSeconds = 60, retryInterval = 2000, skipPreflight = false, preflightCommitment = 'processed', confirmationCommitment = 'confirmed', maxBlockhashAge = 60, enableLogging = false, confirmationNodes = 3, } = options;
+        const mergedOptions = {
+            skipPreflight: false,
+            preflightCommitment: 'processed',
+            ...DEFAULT_CONFIG.TRANSACTION,
+            ...options,
+        };
+        const { timeoutSeconds, retryInterval, skipPreflight, preflightCommitment, confirmationCommitment, maxBlockhashAge, enableLogging, confirmationNodes, } = mergedOptions;
         const stateId = this.generateStateId();
         const state = {
             state: TransactionState.PENDING,
@@ -30,7 +36,7 @@ export class SteroidTransaction {
                 await this.simulateTransaction(transaction, preflightCommitment, enableLogging);
                 this.updateState(stateId, TransactionState.SIMULATED);
             }
-            // 2. Get fresh blockhash and set it on the transaction if it's a legacy transaction
+            // 2. Initial blockhash setup if needed
             let blockhashContext;
             if (this.isLegacyTransaction(transaction)) {
                 blockhashContext = await this.getFreshBlockhash(enableLogging);
@@ -47,9 +53,9 @@ export class SteroidTransaction {
                     state.attempts++;
                     state.lastAttemptTime = Date.now();
                     // Check if blockhash is too old and refresh if needed
-                    const blockhasAge = (Date.now() - lastBlockhashRefresh) / 1000;
-                    if (blockhasAge > maxBlockhashAge && this.isLegacyTransaction(transaction)) {
-                        this.log(enableLogging, 'info', `Blockhash age ${blockhasAge}s exceeds max ${maxBlockhashAge}s, refreshing...`);
+                    const ageSeconds = (Date.now() - lastBlockhashRefresh) / 1000;
+                    if (ageSeconds > maxBlockhashAge && this.isLegacyTransaction(transaction)) {
+                        this.log('info', `Blockhash age ${ageSeconds.toFixed(1)}s exceeds max ${maxBlockhashAge}s, refreshing...`, enableLogging);
                         blockhashContext = await this.getFreshBlockhash(enableLogging);
                         transaction.recentBlockhash = blockhashContext.blockhash;
                         transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
@@ -63,29 +69,26 @@ export class SteroidTransaction {
                         maxRetries: 0, // We handle retries ourselves
                     });
                     this.updateState(stateId, TransactionState.SENT, signature);
-                    this.log(enableLogging, 'info', `Transaction sent: ${signature} (attempt ${state.attempts})`);
+                    this.log('info', `Transaction sent: ${signature} (attempt ${state.attempts})`, enableLogging);
                     // 4. Multi-node confirmation check
                     const confirmed = await this.pollForConfirmation(signature, confirmationCommitment, confirmationNodes, enableLogging);
                     if (confirmed) {
                         this.updateState(stateId, TransactionState.CONFIRMED, signature);
                         state.confirmedAt = Date.now();
                         const duration = ((state.confirmedAt - state.startTime) / 1000).toFixed(2);
-                        this.log(enableLogging, 'info', `Transaction confirmed in ${duration}s after ${state.attempts} attempts`);
+                        this.log('info', `Transaction confirmed in ${duration}s after ${state.attempts} attempts`, enableLogging);
                         return signature;
                     }
-                    this.log(enableLogging, 'warn', `Transaction not yet confirmed, will retry...`);
+                    this.log('warn', `Transaction not yet confirmed, will retry in ${retryInterval}ms...`, enableLogging);
                 }
                 catch (error) {
                     // Handle blockhash expiration
-                    if (error instanceof TransactionExpiredBlockheightExceededError ||
-                        error.message?.includes('block height exceeded') ||
-                        error.message?.includes('blockhash not found')) {
-                        this.log(enableLogging, 'warn', 'Blockhash expired, will refresh on next attempt');
-                        // Force refresh on next iteration
-                        lastBlockhashRefresh = 0;
+                    if (this.isBlockhashExpiredError(error)) {
+                        this.log('warn', 'Blockhash expired or invalid, will refresh on next attempt', enableLogging);
+                        lastBlockhashRefresh = 0; // Force refresh on next iteration
                     }
                     else {
-                        this.log(enableLogging, 'warn', `Broadcast attempt failed: ${error.message}`);
+                        this.log('warn', `Broadcast attempt failed: ${error.message}`, enableLogging);
                     }
                 }
                 await this.sleep(retryInterval);
@@ -107,22 +110,20 @@ export class SteroidTransaction {
         try {
             const simulation = await this.connection.simulateTransaction(transaction, {
                 commitment,
-                replaceRecentBlockhash: true, // Use latest blockhash for simulation
+                replaceRecentBlockhash: true,
             });
             if (simulation.value.err) {
                 const errorDetails = this.parseSimulationError(simulation.value);
-                this.log(enableLogging, 'error', 'Simulation failed:', errorDetails);
+                this.log('error', `Simulation failed: ${errorDetails}`, enableLogging);
                 throw new Error(`[SteroidTransaction] Simulation failed: ${errorDetails}`);
             }
-            // Log simulation results
             if (simulation.value.logs) {
-                this.log(enableLogging, 'info', 'Simulation succeeded. Logs:', simulation.value.logs);
+                this.log('info', `Simulation succeeded. Logs count: ${simulation.value.logs.length}`, enableLogging);
             }
         }
         catch (error) {
-            if (error.message?.includes('Simulation failed')) {
-                throw error; // Re-throw our enhanced error
-            }
+            if (error.message?.includes('Simulation failed'))
+                throw error;
             throw new Error(`[SteroidTransaction] Simulation error: ${error.message}`);
         }
     }
@@ -132,39 +133,34 @@ export class SteroidTransaction {
     async pollForConfirmation(signature, commitment, nodesToCheck, enableLogging) {
         const endpoints = this.connection.getEndpoints();
         const endpointsToCheck = endpoints.slice(0, Math.min(nodesToCheck, endpoints.length));
-        this.log(enableLogging, 'info', `Checking confirmation across ${endpointsToCheck.length} nodes...`);
-        // Check multiple nodes in parallel to find the one that saw the tx
+        this.log('info', `Checking confirmation across ${endpointsToCheck.length} nodes...`, enableLogging);
         const checks = endpointsToCheck.map(async (url) => {
             try {
                 const tempConn = new Connection(url, { commitment });
                 const status = await tempConn.getSignatureStatus(signature);
-                // Check for errors
                 if (status.value?.err) {
-                    this.log(enableLogging, 'error', `Transaction failed on ${url}:`, JSON.stringify(status.value.err));
-                    throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+                    throw new Error(`Transaction failed on ${url}: ${JSON.stringify(status.value.err)}`);
                 }
-                // Check confirmation status
                 const isConfirmed = status.value?.confirmationStatus === 'confirmed' ||
                     status.value?.confirmationStatus === 'finalized';
                 if (isConfirmed && status.value) {
-                    this.log(enableLogging, 'info', `Transaction confirmed on ${url} (${status.value.confirmationStatus})`);
+                    this.log('info', `Transaction confirmed on ${url} (${status.value.confirmationStatus})`, enableLogging);
                     return true;
                 }
                 return false;
             }
             catch (error) {
-                this.log(enableLogging, 'warn', `Confirmation check failed for ${url}:`, error.message);
+                this.log('warn', `Confirmation check failed for ${url}: ${error.message}`, enableLogging);
                 return false;
             }
         });
         const results = await Promise.allSettled(checks);
-        // If any node reports an error, throw it
+        // Fail-fast if any node reports a definitive transaction error
         for (const result of results) {
             if (result.status === 'rejected' && result.reason?.message?.includes('Transaction failed')) {
                 throw result.reason;
             }
         }
-        // Return true if any node confirmed it
         return results.some((r) => r.status === 'fulfilled' && r.value === true);
     }
     /**
@@ -173,7 +169,7 @@ export class SteroidTransaction {
     async getFreshBlockhash(enableLogging) {
         try {
             const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
-            this.log(enableLogging, 'info', `Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`);
+            this.log('info', `Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`, enableLogging);
             return { blockhash, lastValidBlockHeight };
         }
         catch (error) {
@@ -185,19 +181,12 @@ export class SteroidTransaction {
      */
     parseSimulationError(simulationValue) {
         const logs = simulationValue.logs || [];
-        // Look for program errors in logs
-        const errorLog = logs.find((l) => l.includes('Error:') ||
-            l.includes('failed') ||
-            l.includes('custom program error'));
-        if (errorLog) {
+        const errorLog = logs.find((l) => l.includes('Error:') || l.includes('failed') || l.includes('custom program error'));
+        if (errorLog)
             return errorLog;
-        }
-        // Parse error object
         if (simulationValue.err) {
-            if (typeof simulationValue.err === 'string') {
+            if (typeof simulationValue.err === 'string')
                 return simulationValue.err;
-            }
-            // Handle InstructionError format
             if (simulationValue.err.InstructionError) {
                 const [index, error] = simulationValue.err.InstructionError;
                 return `Instruction ${index} failed: ${JSON.stringify(error)}`;
@@ -205,6 +194,11 @@ export class SteroidTransaction {
             return JSON.stringify(simulationValue.err);
         }
         return 'Unknown simulation error';
+    }
+    isBlockhashExpiredError(error) {
+        return (error instanceof TransactionExpiredBlockheightExceededError ||
+            error.message?.includes('block height exceeded') ||
+            error.message?.includes('blockhash not found'));
     }
     /**
      * Type guard for legacy transactions.
@@ -234,19 +228,20 @@ export class SteroidTransaction {
                 existing.error = error;
         }
     }
-    log(enabled, level, ...args) {
+    log(level, message, enabled) {
         if (!enabled)
             return;
         const prefix = '[SteroidTransaction]';
+        const formattedMessage = `${prefix} ${message}`;
         switch (level) {
             case 'info':
-                console.log(prefix, ...args);
+                console.log(formattedMessage);
                 break;
             case 'warn':
-                console.warn(prefix, ...args);
+                console.warn(formattedMessage);
                 break;
             case 'error':
-                console.error(prefix, ...args);
+                console.error(formattedMessage);
                 break;
         }
     }

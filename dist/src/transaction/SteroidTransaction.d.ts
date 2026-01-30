@@ -30,6 +30,7 @@ export declare class SteroidTransaction {
      * Parse simulation errors into human-readable format.
      */
     private parseSimulationError;
+    private isBlockhashExpiredError;
     /**
      * Type guard for legacy transactions.
      */
