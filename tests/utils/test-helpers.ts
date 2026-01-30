@@ -16,7 +16,7 @@ export function createTestTransaction(feePayer?: PublicKey): Transaction {
   );
   
   tx.feePayer = payer;
-  tx.recentBlockhash = 'mockBlockhash123456789';
+  tx.recentBlockhash = '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA';
   
   return tx;
 }

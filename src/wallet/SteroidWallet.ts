@@ -4,31 +4,14 @@ import {
   VersionedTransaction,
   TransactionSignature,
 } from '@solana/web3.js';
-import { SteroidTransaction, SteroidSendOptions } from '../transaction/SteroidTransaction.js';
+import { SteroidTransaction } from '../transaction/SteroidTransaction.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
-
-/**
- * Minimal wallet interface that most Solana wallets implement.
- * Compatible with @solana/wallet-adapter.
- */
-export interface WalletInterface {
-  publicKey: PublicKey | null;
-  signTransaction<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T>;
-  signAllTransactions<T extends Transaction | VersionedTransaction>(transactions: T[]): Promise<T[]>;
-  signMessage?(message: Uint8Array): Promise<Uint8Array>;
-}
-
-/**
- * Normalized wallet error types for consistent error handling.
- */
-export enum WalletErrorType {
-  NOT_CONNECTED = 'NOT_CONNECTED',
-  USER_REJECTED = 'USER_REJECTED',
-  NETWORK_MISMATCH = 'NETWORK_MISMATCH',
-  SIGNING_FAILED = 'SIGNING_FAILED',
-  UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
-  UNKNOWN = 'UNKNOWN',
-}
+import { 
+  WalletInterface, 
+  WalletErrorType, 
+  SteroidWalletConfig,
+  SteroidSendOptions 
+} from '../types/SteroidWalletTypes.js';
 
 export class WalletError extends Error {
   constructor(
@@ -39,36 +22,6 @@ export class WalletError extends Error {
     super(message);
     this.name = 'WalletError';
   }
-}
-
-/**
- * Configuration for SteroidWallet behavior.
- */
-export interface SteroidWalletConfig {
-  /**
-   * Validate network consistency before signing transactions.
-   * @default true
-   */
-  validateNetwork?: boolean;
-  /**
-   * Expected genesis hash for network validation (optional).
-   */
-  expectedGenesisHash?: string;
-  /**
-   * Enable detailed logging.
-   * @default false
-   */
-  enableLogging?: boolean;
-  /**
-   * Automatically refresh blockhash before signing if stale.
-   * @default true
-   */
-  autoRefreshBlockhash?: boolean;
-  /**
-   * Maximum blockhash age in seconds before refresh.
-   * @default 60
-   */
-  maxBlockhashAge?: number;
 }
 
 /**

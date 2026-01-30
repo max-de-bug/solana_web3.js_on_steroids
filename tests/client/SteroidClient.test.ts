@@ -1,23 +1,26 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PublicKey, Connection } from '@solana/web3.js';
-import { SteroidClient, createSteroidClient } from '../../src/SteroidClient.js';
+import { SteroidClient, createSteroidClient } from '../../src/client/SteroidClient.js';
 import { SteroidWallet } from '../../src/wallet/SteroidWallet.js';
-import type { WalletInterface } from '../../src/wallet/SteroidWallet.js';
+import { WalletInterface } from '../../src/types/SteroidWalletTypes.js';
 
 // Mock the Connection class
 vi.mock('@solana/web3.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@solana/web3.js')>();
   return {
     ...actual,
-    Connection: vi.fn().mockImplementation((url: string) => ({
-      _url: url,
-      getSlot: vi.fn().mockResolvedValue(12345),
-      getLatestBlockhash: vi.fn().mockResolvedValue({
-        blockhash: 'mockBlockhash123456789',
-        lastValidBlockHeight: 100000,
-      }),
-      getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
-    })),
+    Connection: vi.fn().mockImplementation(function (url: string) {
+      return {
+        _url: url,
+        getSlot: vi.fn().mockResolvedValue(12345),
+        getLatestBlockhash: vi.fn().mockResolvedValue({
+          blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
+          lastValidBlockHeight: 100000,
+        }),
+        getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
+        sendRawTransaction: vi.fn().mockResolvedValue('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X'),
+      };
+    }),
   };
 });
 
@@ -212,8 +215,7 @@ describe('SteroidClient', () => {
       client.destroy();
       
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[SteroidClient]'),
-        expect.stringContaining('Destroyed')
+        expect.stringContaining('[SteroidClient] Destroyed')
       );
       
       consoleSpy.mockRestore();

@@ -1,35 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Transaction, Keypair, SystemProgram, Connection } from '@solana/web3.js';
-import { SteroidTransaction, TransactionState } from '../../src/transaction/SteroidTransaction.js';
-import { SteroidConnection } from '../../src/connection/SteroidConnection.js';
+import { createMockConnection } from '../mocks/connection.mock.js';
 
-// Create a mock SteroidConnection
-function createMockSteroidConnection(overrides: Partial<any> = {}) {
-  const mockConnection = {
-    getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'mockBlockhash123456789',
-      lastValidBlockHeight: 100000,
+// shared mock state that all mocked Connection instances will use
+let sharedMock = createMockConnection();
+
+// Mock the Connection class to ensure SteroidConnection and internal temp connections use our mocks
+vi.mock('@solana/web3.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@solana/web3.js')>();
+  
+  return {
+    ...actual,
+    Connection: vi.fn().mockImplementation(function (url: string) {
+      const mock = { ...sharedMock };
+      (mock as any)._url = url;
+      return mock;
     }),
-    simulateTransaction: vi.fn().mockResolvedValue({
-      value: {
-        err: null,
-        logs: ['Program log: success'],
-      },
-    }),
-    sendRawTransaction: vi.fn().mockResolvedValue('mockSignature123456789'),
-    getSignatureStatus: vi.fn().mockResolvedValue({
-      value: {
-        confirmationStatus: 'confirmed',
-        err: null,
-      },
-    }),
-    getEndpoints: vi.fn().mockReturnValue(['https://mock.solana.com']),
-    getActiveEndpoint: vi.fn().mockReturnValue('https://mock.solana.com'),
-    ...overrides,
   };
+});
 
-  return mockConnection as unknown as SteroidConnection;
-}
+import { Transaction, Keypair, SystemProgram, Connection } from '@solana/web3.js';
+import { SteroidTransaction } from '../../src/transaction/SteroidTransaction.js';
+import { SteroidConnection } from '../../src/connection/SteroidConnection.js';
+import { TransactionState } from '../../src/types/SteroidWalletTypes.js';
 
 function createTestTransaction(): Transaction {
   const payer = Keypair.generate();
@@ -44,20 +36,27 @@ function createTestTransaction(): Transaction {
   );
   
   tx.feePayer = payer.publicKey;
-  tx.recentBlockhash = 'mockBlockhash123456789';
+  tx.recentBlockhash = '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA';
   tx.sign(payer);
   
   return tx;
 }
 
 describe('SteroidTransaction', () => {
-  let mockConnection: ReturnType<typeof createMockSteroidConnection>;
+  let mockConnection: any;
   let transactionEngine: SteroidTransaction;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockConnection = createMockSteroidConnection();
-    transactionEngine = new SteroidTransaction(mockConnection);
+    
+    // Reset shared mock and wrap it in a SteroidConnection
+    sharedMock = createMockConnection({
+      getEndpoints: vi.fn().mockReturnValue(['https://mock.solana.com']),
+      getActiveEndpoint: vi.fn().mockReturnValue('https://mock.solana.com'),
+    } as any);
+    
+    mockConnection = sharedMock;
+    transactionEngine = new SteroidTransaction(mockConnection as unknown as SteroidConnection);
   });
 
   afterEach(() => {
@@ -87,7 +86,7 @@ describe('SteroidTransaction', () => {
         skipPreflight: true,
       });
       
-      expect(signature).toBe('mockSignature123456789');
+      expect(signature).toBe('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X');
       expect(mockConnection.sendRawTransaction).toHaveBeenCalled();
     });
 
@@ -181,7 +180,7 @@ describe('SteroidTransaction', () => {
         confirmationNodes: 3,
       });
       
-      expect(signature).toBe('mockSignature123456789');
+      expect(signature).toBe('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X');
     });
   });
 

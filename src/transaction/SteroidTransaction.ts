@@ -9,60 +9,7 @@ import {
   TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
-
-export interface SteroidSendOptions extends SendOptions {
-  /**
-   * Maximum number of seconds to retry sending.
-   * @default 60
-   */
-  timeoutSeconds?: number;
-  /**
-   * Delay between re-broadcasts in milliseconds.
-   * @default 2000
-   */
-  retryInterval?: number;
-  /**
-   * Commitment level for confirmation.
-   * @default 'confirmed'
-   */
-  confirmationCommitment?: Commitment;
-  /**
-   * Maximum age of blockhash in seconds before refreshing.
-   * @default 60
-   */
-  maxBlockhashAge?: number;
-  /**
-   * Enable detailed logging.
-   * @default false
-   */
-  enableLogging?: boolean;
-  /**
-   * Number of nodes to check for confirmation.
-   * @default 3
-   */
-  confirmationNodes?: number;
-}
-
-export enum TransactionState {
-  PENDING = 'PENDING',
-  SIMULATED = 'SIMULATED',
-  SIGNED = 'SIGNED',
-  SENT = 'SENT',
-  CONFIRMED = 'CONFIRMED',
-  FINALIZED = 'FINALIZED',
-  FAILED = 'FAILED',
-  EXPIRED = 'EXPIRED',
-}
-
-export interface TransactionStateInfo {
-  state: TransactionState;
-  signature?: string;
-  error?: string;
-  attempts: number;
-  startTime: number;
-  lastAttemptTime?: number;
-  confirmedAt?: number;
-}
+import { SteroidSendOptions, TransactionState, TransactionStateInfo } from '../types/SteroidWalletTypes.js';
 
 /**
  * Enhanced transaction handling with state management, automatic retries,
@@ -264,9 +211,10 @@ export class SteroidTransaction {
 
         if (isConfirmed && status.value) {
           this.log(enableLogging, 'info', `Transaction confirmed on ${url} (${status.value.confirmationStatus})`);
+          return true;
         }
-
-        return isConfirmed;
+        
+        return false;
       } catch (error: any) {
         this.log(enableLogging, 'warn', `Confirmation check failed for ${url}:`, error.message);
         return false;

@@ -1,0 +1,22 @@
+# Exclude source code
+src/
+node_modules/
+
+# Exclude tests
+tests/
+vitest.config.ts
+
+# Exclude config files
+tsconfig.json
+.antigravityignore
+.agent/
+.gemini/
+brain/
+
+# Exclude logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Include built files (dist)
+!dist/

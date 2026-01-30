@@ -1,43 +1,5 @@
-import { Connection, ConnectionConfig, Commitment } from '@solana/web3.js';
-
-export interface SteroidConnectionConfig extends ConnectionConfig {
-  /**
-   * List of fallback RPC URLs to use if the primary one fails.
-   */
-  fallbacks?: string[];
-  /**
-   * Maximum number of retries for rate-limited or transient errors.
-   * @default 5
-   */
-  maxRetries?: number;
-  /**
-   * Initial delay for exponential backoff in milliseconds.
-   * @default 500
-   */
-  retryDelay?: number;
-  /**
-   * Health check interval in milliseconds (0 to disable).
-   * @default 30000
-   */
-  healthCheckInterval?: number;
-  /**
-   * Timeout for individual RPC calls in milliseconds.
-   * @default 30000
-   */
-  requestTimeout?: number;
-  /**
-   * Enable detailed logging.
-   * @default false
-   */
-  enableLogging?: boolean;
-}
-
-interface RPCHealth {
-  url: string;
-  healthy: boolean;
-  lastChecked: number;
-  latency?: number;
-}
+import { Connection } from '@solana/web3.js';
+import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.

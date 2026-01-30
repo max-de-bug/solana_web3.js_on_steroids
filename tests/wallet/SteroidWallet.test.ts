@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Transaction, Keypair, SystemProgram, PublicKey } from '@solana/web3.js';
-import { SteroidWallet, WalletError, WalletErrorType } from '../../src/wallet/SteroidWallet.js';
+import { SteroidWallet, WalletError } from '../../src/wallet/SteroidWallet.js';
 import { SteroidConnection } from '../../src/connection/SteroidConnection.js';
-import type { WalletInterface } from '../../src/wallet/SteroidWallet.js';
+import { WalletInterface, WalletErrorType } from '../../src/types/SteroidWalletTypes.js';
 
 // Create mock wallet
 function createMockWallet(publicKey?: PublicKey): WalletInterface {
@@ -23,11 +23,11 @@ function createMockSteroidConnection(): SteroidConnection {
       blockhash: 'mockBlockhash123456789',
       lastValidBlockHeight: 100000,
     }),
-    getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
+    getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
     simulateTransaction: vi.fn().mockResolvedValue({
       value: { err: null, logs: [] },
     }),
-    sendRawTransaction: vi.fn().mockResolvedValue('mockSignature123456789'),
+    sendRawTransaction: vi.fn().mockResolvedValue('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X'),
     getSignatureStatus: vi.fn().mockResolvedValue({
       value: { confirmationStatus: 'confirmed', err: null },
     }),
@@ -48,7 +48,7 @@ function createTestTransaction(): Transaction {
   );
   
   tx.feePayer = payer.publicKey;
-  tx.recentBlockhash = 'mockBlockhash123456789';
+  tx.recentBlockhash = '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA';
   
   return tx;
 }

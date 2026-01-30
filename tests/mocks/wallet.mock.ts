@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import type { WalletInterface } from '../../src/wallet/SteroidWallet.js';
+import { WalletInterface } from '../../src/types/SteroidWalletTypes.js';
 
 /**
  * Create a mock wallet that behaves correctly

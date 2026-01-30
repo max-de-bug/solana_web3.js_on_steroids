@@ -8,17 +8,17 @@ export function createMockConnection(overrides: Partial<Connection> = {}): Conne
   const mockConnection = {
     getSlot: vi.fn().mockResolvedValue(12345),
     getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'mockBlockhash123456789',
+      blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
       lastValidBlockHeight: 100000,
     }),
-    getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
+    getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
     simulateTransaction: vi.fn().mockResolvedValue({
       value: {
         err: null,
         logs: ['Log: success'],
       },
     }),
-    sendRawTransaction: vi.fn().mockResolvedValue('mockSignature123456789'),
+    sendRawTransaction: vi.fn().mockResolvedValue('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X'),
     getSignatureStatus: vi.fn().mockResolvedValue({
       value: {
         confirmationStatus: 'confirmed',
@@ -52,7 +52,7 @@ export function createFailingMockConnection(
       return Promise.resolve(12345);
     }),
     getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'mockBlockhash123456789',
+      blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
       lastValidBlockHeight: 100000,
     }),
     getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
@@ -83,7 +83,7 @@ export function createRateLimitedMockConnection(rateLimitUntilAttempt: number): 
       return Promise.resolve(12345);
     }),
     getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'mockBlockhash123456789',
+      blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
       lastValidBlockHeight: 100000,
     }),
   } as unknown as Connection;

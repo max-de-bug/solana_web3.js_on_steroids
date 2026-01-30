@@ -7,15 +7,17 @@ vi.mock('@solana/web3.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@solana/web3.js')>();
   return {
     ...actual,
-    Connection: vi.fn().mockImplementation((url: string) => ({
-      _url: url,
-      getSlot: vi.fn().mockResolvedValue(12345),
-      getLatestBlockhash: vi.fn().mockResolvedValue({
-        blockhash: 'mockBlockhash123456789',
-        lastValidBlockHeight: 100000,
-      }),
-      getGenesisHash: vi.fn().mockResolvedValue('mockGenesisHash123456789'),
-    })),
+    Connection: vi.fn().mockImplementation(function (url: string) {
+      return {
+        _url: url,
+        getSlot: vi.fn().mockResolvedValue(12345),
+        getLatestBlockhash: vi.fn().mockResolvedValue({
+          blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
+          lastValidBlockHeight: 100000,
+        }),
+        getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
+      };
+    }),
   };
 });
 
@@ -124,7 +126,7 @@ describe('SteroidConnection', () => {
       }) as any;
       
       const result = await connection.getLatestBlockhash();
-      expect(result.blockhash).toBe('mockBlockhash123456789');
+      expect(result.blockhash).toBe('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA');
       expect(result.lastValidBlockHeight).toBe(100000);
     });
   });
