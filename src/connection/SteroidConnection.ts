@@ -89,14 +89,15 @@ export class SteroidConnection {
         this.updateHealthStatus(this.getActiveEndpoint(), true);
         return result;
       } catch (error: any) {
-        lastError = error;
+        // Map AbortError from our controller to a "Request timeout" message for consistency
+        lastError = error.name === 'AbortError' ? new Error('Request timeout') : error;
         attemptedUrls.add(this.currentUrlIndex);
         
-        this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, error.message);
+        this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
 
-        const shouldRetry = await this.handleExecutionError(error, methodName, attempt, attemptedUrls);
+        const shouldRetry = await this.handleExecutionError(lastError, methodName, attempt, attemptedUrls);
         if (!shouldRetry) {
-          throw this.enhanceError(error, methodName, attempt + 1);
+          throw this.enhanceError(lastError, methodName, attempt + 1);
         }
       }
     }
@@ -105,7 +106,8 @@ export class SteroidConnection {
   }
 
   /**
-   * Internal helper to execute a method with a promise-based timeout.
+   * Internal helper to execute a method with a promise-based timeout and AbortController.
+   * This effectively cancels the underlying network request on timeout.
    */
   private async callWithTimeout(
     method: Function, 
@@ -113,10 +115,21 @@ export class SteroidConnection {
     target: any, 
     timeoutMs: number
   ): Promise<any> {
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Request timeout')), timeoutMs)
-    );
-    return Promise.race([method.apply(target, args), timeoutPromise]);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      // 1. Check if the method likely accepts a config object with an AbortSignal
+      // Many web3.js methods take an optional config as the last argument
+      const lastArg = args[args.length - 1];
+      const methodWithSignal = (typeof lastArg === 'object' && lastArg !== null && !Array.isArray(lastArg))
+        ? method.apply(target, [...args.slice(0, -1), { ...lastArg, signal: controller.signal }])
+        : method.apply(target, [...args, { signal: controller.signal }]);
+
+      return await methodWithSignal;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**

@@ -23,7 +23,8 @@ export declare class SteroidConnection {
      */
     private executeWithResilience;
     /**
-     * Internal helper to execute a method with a promise-based timeout.
+     * Internal helper to execute a method with a promise-based timeout and AbortController.
+     * This effectively cancels the underlying network request on timeout.
      */
     private callWithTimeout;
     /**
