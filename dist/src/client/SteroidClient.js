@@ -37,11 +37,8 @@ export class SteroidClient {
             enableLogging: config.enableLogging ?? config.connection?.enableLogging ?? DEFAULT_CONFIG.CONNECTION.enableLogging,
         };
         this.connection = new SteroidConnection(primary, connectionConfig);
-        // Initialize transaction engine
         this.transactionEngine = new SteroidTransaction(this.connection);
-        if (this.config.enableLogging) {
-            console.log('[SteroidClient] Initialized with endpoint(s):', endpoint);
-        }
+        this.log('info', 'Initialized with endpoint(s):', endpoint);
     }
     /**
      * Connect a wallet to the Steroid reliability layer.
@@ -53,9 +50,10 @@ export class SteroidClient {
     connectWallet(wallet, walletConfig = {}) {
         this.ensureNotDestroyed();
         const mergedConfig = {
-            enableLogging: this.config.enableLogging,
+            ...DEFAULT_CONFIG.WALLET,
             ...this.config.wallet,
             ...walletConfig,
+            enableLogging: this.config.enableLogging ?? walletConfig.enableLogging ?? DEFAULT_CONFIG.WALLET.enableLogging,
         };
         return new SteroidWallet(wallet, this.connection, mergedConfig);
     }
@@ -93,13 +91,34 @@ export class SteroidClient {
             return;
         this.connection.destroy();
         this.isDestroyed = true;
-        if (this.config.enableLogging) {
-            console.log('[SteroidClient] Destroyed');
-        }
+        this.log('info', 'Destroyed');
     }
     ensureNotDestroyed() {
         if (this.isDestroyed) {
-            throw new Error('[SteroidClient] Instance is destroyed');
+            throw new Error('[SteroidClient] Cannot execute operation: instance is already destroyed');
+        }
+    }
+    log(level, ...args) {
+        if (!this.config.enableLogging)
+            return;
+        const prefix = '[SteroidClient]';
+        const finalArgs = [...args];
+        if (typeof finalArgs[0] === 'string') {
+            finalArgs[0] = `${prefix} ${finalArgs[0]}`;
+        }
+        else {
+            finalArgs.unshift(prefix);
+        }
+        switch (level) {
+            case 'info':
+                console.log(...finalArgs);
+                break;
+            case 'warn':
+                console.warn(...finalArgs);
+                break;
+            case 'error':
+                console.error(...finalArgs);
+                break;
         }
     }
 }

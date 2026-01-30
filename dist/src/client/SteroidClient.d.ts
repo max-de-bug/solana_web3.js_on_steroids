@@ -47,6 +47,7 @@ export declare class SteroidClient {
      */
     destroy(): void;
     private ensureNotDestroyed;
+    private log;
 }
 /**
  * Convenience factory function to create a SteroidClient.

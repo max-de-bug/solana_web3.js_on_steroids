@@ -20,6 +20,10 @@ export declare class SteroidConnection {
      */
     private executeWithResilience;
     /**
+     * Internal helper to execute a method with a promise-based timeout.
+     */
+    private callWithTimeout;
+    /**
      * Updates health status for a specific URL.
      */
     private updateHealthStatus;
@@ -28,9 +32,23 @@ export declare class SteroidConnection {
      * @returns true if the loop should continue (retry or failover), false if it should throw.
      */
     private handleExecutionError;
+    private parseErrorContext;
+    /**
+     * Identifies transient errors that should be retried on the same node (e.g. rate limits).
+     */
     private isTransientError;
+    /**
+     * Identifies node-level failures that should trigger a failover to a different RPC.
+     */
     private isNodeFailure;
+    /**
+     * Switches to the next available RPC node.
+     */
     private switchToNextRpc;
+    /**
+     * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
+     */
+    private findNextAvailableRpcIndex;
     private calculateBackoff;
     private sleep;
     private enhanceError;

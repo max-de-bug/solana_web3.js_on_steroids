@@ -58,31 +58,32 @@ export class SteroidConnection {
      * Executes a connection method with intelligent retries and failover.
      */
     async executeWithResilience(methodName, method, args) {
-        let lastError;
-        let attempt = 0;
         const attemptedUrls = new Set();
-        while (attempt < this.steroidConfig.maxRetries) {
+        let lastError;
+        for (let attempt = 0; attempt < this.steroidConfig.maxRetries; attempt++) {
             try {
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), this.steroidConfig.requestTimeout));
-                const result = await Promise.race([
-                    method.apply(this.activeConnection, args),
-                    timeoutPromise
-                ]);
-                this.updateHealthStatus(this.urls[this.currentUrlIndex], true);
+                const result = await this.callWithTimeout(method, args);
+                this.updateHealthStatus(this.getActiveEndpoint(), true);
                 return result;
             }
             catch (error) {
                 lastError = error;
                 attemptedUrls.add(this.currentUrlIndex);
-                this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
-                if (await this.handleExecutionError(lastError, methodName, attempt, attemptedUrls)) {
-                    attempt++;
-                    continue;
+                this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, error.message);
+                const shouldRetry = await this.handleExecutionError(error, methodName, attempt, attemptedUrls);
+                if (!shouldRetry) {
+                    throw this.enhanceError(error, methodName, attempt + 1);
                 }
-                throw this.enhanceError(lastError, methodName, attempt);
             }
         }
         throw this.enhanceError(lastError, methodName, this.steroidConfig.maxRetries);
+    }
+    /**
+     * Internal helper to execute a method with a promise-based timeout.
+     */
+    async callWithTimeout(method, args) {
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), this.steroidConfig.requestTimeout));
+        return Promise.race([method.apply(this.activeConnection, args), timeoutPromise]);
     }
     /**
      * Updates health status for a specific URL.
@@ -118,58 +119,73 @@ export class SteroidConnection {
         }
         return false;
     }
+    parseErrorContext(error) {
+        return {
+            message: error.message?.toLowerCase() || '',
+            statusCode: error.statusCode || error.status || 0,
+        };
+    }
+    /**
+     * Identifies transient errors that should be retried on the same node (e.g. rate limits).
+     */
     isTransientError(error) {
-        const message = error.message?.toLowerCase() || '';
-        const statusCode = error.statusCode || error.status;
-        return (message.includes('retry') ||
-            message.includes('429') ||
-            message.includes('too many requests') ||
-            message.includes('rate limit') ||
-            statusCode === 429 ||
-            statusCode === 408 || // Request timeout
-            message.includes('timeout') && !message.includes('transaction') // RPC timeout, not tx timeout
-        );
+        const { message, statusCode } = this.parseErrorContext(error);
+        const TRANSIENT_MESSAGES = ['retry', '429', 'too many requests', 'rate limit'];
+        const TRANSIENT_STATUS_CODES = [429, 408];
+        const matchedMessage = TRANSIENT_MESSAGES.some((msg) => message.includes(msg));
+        const matchedCode = TRANSIENT_STATUS_CODES.includes(statusCode);
+        const isRpcTimeout = message.includes('timeout') && !message.includes('transaction');
+        return matchedMessage || matchedCode || isRpcTimeout;
     }
+    /**
+     * Identifies node-level failures that should trigger a failover to a different RPC.
+     */
     isNodeFailure(error) {
-        const message = error.message?.toLowerCase() || '';
-        const statusCode = error.statusCode || error.status;
-        return (message.includes('fetch failed') ||
-            message.includes('network error') ||
-            message.includes('econnrefused') ||
-            message.includes('enotfound') ||
-            message.includes('etimedout') ||
-            message.includes('503') ||
-            message.includes('504') ||
-            message.includes('502') ||
-            message.includes('connection reset') ||
-            statusCode === 502 ||
-            statusCode === 503 ||
-            statusCode === 504);
+        const { message, statusCode } = this.parseErrorContext(error);
+        const FAILURE_MESSAGES = [
+            'fetch failed',
+            'network error',
+            'econnrefused',
+            'enotfound',
+            'etimedout',
+            '503',
+            '504',
+            '502',
+            'connection reset',
+        ];
+        const FAILURE_STATUS_CODES = [502, 503, 504];
+        const matchedMessage = FAILURE_MESSAGES.some((msg) => message.includes(msg));
+        const matchedCode = FAILURE_STATUS_CODES.includes(statusCode);
+        return matchedMessage || matchedCode;
     }
+    /**
+     * Switches to the next available RPC node.
+     */
     switchToNextRpc() {
-        const previousIndex = this.currentUrlIndex;
-        // Find next healthy RPC, or cycle through all if none are healthy
-        let attempts = 0;
-        do {
-            this.currentUrlIndex = (this.currentUrlIndex + 1) % this.urls.length;
-            attempts++;
-            const nextUrl = this.urls[this.currentUrlIndex];
-            const health = this.healthStatus.get(nextUrl);
-            // If we find a healthy one, use it
-            if (health?.healthy) {
-                break;
-            }
-            // If we've tried all URLs, just use the next one regardless of health
-            if (attempts >= this.urls.length) {
-                break;
-            }
-        } while (this.currentUrlIndex !== previousIndex);
-        const nextUrl = this.urls[this.currentUrlIndex];
+        const nextIndex = this.findNextAvailableRpcIndex();
+        const previousUrl = this.urls[this.currentUrlIndex];
+        const nextUrl = this.urls[nextIndex];
+        this.currentUrlIndex = nextIndex;
         this.failoverCount++;
         this.lastFailoverTime = Date.now();
-        this.log('warn', `Failover triggered (#${this.failoverCount}). Switching from ${this.urls[previousIndex]} to ${nextUrl}`);
-        // Completely recreate the connection to clear internal state/websockets
+        this.log('warn', `Failover triggered (#${this.failoverCount}). Switching from ${previousUrl} to ${nextUrl}`);
+        // Recreate the connection to clear internal state/websockets
         this.activeConnection = new Connection(nextUrl, this.config);
+    }
+    /**
+     * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
+     */
+    findNextAvailableRpcIndex() {
+        const startIndex = (this.currentUrlIndex + 1) % this.urls.length;
+        // 1. Try to find the next healthy RPC starting from the next in line
+        for (let i = 0; i < this.urls.length; i++) {
+            const index = (startIndex + i) % this.urls.length;
+            if (this.healthStatus.get(this.urls[index])?.healthy) {
+                return index;
+            }
+        }
+        // 2. Fallback: if all are unhealthy, just try the very next one in the list
+        return startIndex;
     }
     calculateBackoff(attempt) {
         const baseDelay = this.steroidConfig.retryDelay;
@@ -192,15 +208,22 @@ export class SteroidConnection {
         if (!this.steroidConfig.enableLogging)
             return;
         const prefix = '[SteroidConnection]';
+        const finalArgs = [...args];
+        if (typeof finalArgs[0] === 'string') {
+            finalArgs[0] = `${prefix} ${finalArgs[0]}`;
+        }
+        else {
+            finalArgs.unshift(prefix);
+        }
         switch (level) {
             case 'info':
-                console.log(prefix, ...args);
+                console.log(...finalArgs);
                 break;
             case 'warn':
-                console.warn(prefix, ...args);
+                console.warn(...finalArgs);
                 break;
             case 'error':
-                console.error(prefix, ...args);
+                console.error(...finalArgs);
                 break;
         }
     }
