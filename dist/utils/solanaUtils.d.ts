@@ -4,6 +4,10 @@ import { Transaction, VersionedTransaction } from '@solana/web3.js';
  */
 export declare function isLegacyTransaction(transaction: Transaction | VersionedTransaction): transaction is Transaction;
 /**
+ * Type guard for versioned transactions.
+ */
+export declare function isVersionedTransaction(transaction: Transaction | VersionedTransaction): transaction is VersionedTransaction;
+/**
  * Parse simulation errors into a human-readable format.
  */
 export declare function parseSimulationError(simulationValue: any): string;

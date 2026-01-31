@@ -6,6 +6,12 @@ export function isLegacyTransaction(transaction) {
     return 'recentBlockhash' in transaction;
 }
 /**
+ * Type guard for versioned transactions.
+ */
+export function isVersionedTransaction(transaction) {
+    return 'version' in transaction;
+}
+/**
  * Parse simulation errors into a human-readable format.
  */
 export function parseSimulationError(simulationValue) {

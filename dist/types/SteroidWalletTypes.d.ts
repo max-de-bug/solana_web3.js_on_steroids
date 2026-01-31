@@ -101,11 +101,6 @@ export type TransactionResult = {
 export type ErrorHandler = (error: Error) => void | Promise<void>;
 export type TransactionCallback = (signature: TransactionSignature, state: TransactionStateInfo) => void | Promise<void>;
 /**
- * Type guards
- */
-export declare function isLegacyTransaction(transaction: AnyTransaction): transaction is Transaction;
-export declare function isVersionedTransaction(transaction: AnyTransaction): transaction is VersionedTransaction;
-/**
  * Helper types for improved DX
  */
 export type WithOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;

@@ -19,15 +19,6 @@ export var WalletErrorType;
     WalletErrorType["UNKNOWN"] = "UNKNOWN";
 })(WalletErrorType || (WalletErrorType = {}));
 /**
- * Type guards
- */
-export function isLegacyTransaction(transaction) {
-    return 'recentBlockhash' in transaction;
-}
-export function isVersionedTransaction(transaction) {
-    return 'version' in transaction;
-}
-/**
  * Constants
  */
 export const DEFAULT_CONFIG = {

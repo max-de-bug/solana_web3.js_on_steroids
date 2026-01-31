@@ -14,6 +14,15 @@ export function isLegacyTransaction(
 }
 
 /**
+ * Type guard for versioned transactions.
+ */
+export function isVersionedTransaction(
+  transaction: Transaction | VersionedTransaction
+): transaction is VersionedTransaction {
+  return 'version' in (transaction as any);
+}
+
+/**
  * Parse simulation errors into a human-readable format.
  */
 export function parseSimulationError(simulationValue: any): string {

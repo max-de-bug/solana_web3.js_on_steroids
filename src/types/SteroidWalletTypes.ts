@@ -151,21 +151,6 @@ export type TransactionCallback = (
 ) => void | Promise<void>;
 
 /**
- * Type guards
- */
-export function isLegacyTransaction(
-  transaction: AnyTransaction
-): transaction is Transaction {
-  return 'recentBlockhash' in transaction;
-}
-
-export function isVersionedTransaction(
-  transaction: AnyTransaction
-): transaction is VersionedTransaction {
-  return 'version' in transaction;
-}
-
-/**
  * Helper types for improved DX
  */
 export type WithOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
