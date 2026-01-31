@@ -18,6 +18,7 @@ export declare class SteroidWallet {
     private connection;
     private txEngine;
     private config;
+    private logger;
     private networkValidated;
     private genesisHash?;
     constructor(wallet: WalletInterface, connection: SteroidConnection, config?: SteroidWalletConfig);
@@ -62,10 +63,6 @@ export declare class SteroidWallet {
      * Normalizes different wallet errors into a consistent format.
      */
     private normalizeError;
-    /**
-     * Type guard for legacy transactions.
-     */
-    private isLegacyTransaction;
     private log;
     /**
      * Get network information.

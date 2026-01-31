@@ -5,10 +5,20 @@ import {
   VersionedTransaction,
   Commitment,
   BlockhashWithExpiryBlockHeight,
-  TransactionExpiredBlockheightExceededError,
+
 } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
 import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
+import { 
+  isLegacyTransaction, 
+  sleep, 
+  Logger, 
+  parseSimulationError, 
+  isBlockhashExpiredError, 
+  serializeTransaction, 
+  generateId, 
+  clearExpiredEntries 
+} from '../utils/index.js';
 
 /**
  * Enhanced transaction handling with state management, automatic retries,
@@ -17,9 +27,11 @@ import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CON
 export class SteroidTransaction {
   private connection: SteroidConnection;
   private transactionStates: Map<string, TransactionStateInfo> = new Map();
+  private logger: Logger;
 
   constructor(connection: SteroidConnection) {
     this.connection = connection;
+    this.logger = new Logger('SteroidTransaction', false);
   }
 
  
@@ -49,7 +61,12 @@ export class SteroidTransaction {
       confirmationNodes,
     } = mergedOptions;
 
-    const stateId = this.generateStateId();
+    const executionTimeout = timeoutSeconds * 1000;
+
+    // Update logger preference for this call
+    this.logger.setEnabled(enableLogging || false);
+    
+    const stateId = generateId('tx');
     const state: TransactionStateInfo = {
       state: TransactionState.PENDING,
       attempts: 0,
@@ -61,34 +78,35 @@ export class SteroidTransaction {
       // 1. Simulation with detailed error parsing
       if (!skipPreflight) {
         this.updateState(stateId, TransactionState.PENDING);
-        await this.simulateTransaction(transaction, preflightCommitment, enableLogging);
+        await this.simulateTransaction(transaction, preflightCommitment);
         this.updateState(stateId, TransactionState.SIMULATED);
       }
 
       // 2. Initial blockhash setup if needed
       let blockhashContext: BlockhashWithExpiryBlockHeight | undefined;
-      if (this.isLegacyTransaction(transaction)) {
-        blockhashContext = await this.getFreshBlockhash(enableLogging);
+      if (isLegacyTransaction(transaction)) {
+        blockhashContext = await this.getFreshBlockhash();
         transaction.recentBlockhash = blockhashContext.blockhash;
         transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
       }
 
-      const rawTransaction = this.serializeTransaction(transaction);
       const startTime = Date.now();
       let signature: TransactionSignature = '';
       let lastBlockhashRefresh = Date.now();
+      let attempts = 0;
 
       // 3. Send and retry loop with blockhash refresh
-      while (Date.now() - startTime < timeoutSeconds * 1000) {
+      while (Date.now() - startTime < executionTimeout) {
         try {
-          state.attempts++;
+          attempts++;
+          state.attempts = attempts; // Update state attempts
           state.lastAttemptTime = Date.now();
 
           // Check if blockhash is too old and refresh if needed
           const ageSeconds = (Date.now() - lastBlockhashRefresh) / 1000;
-          if (ageSeconds > maxBlockhashAge && this.isLegacyTransaction(transaction)) {
-            this.log('info', `Blockhash age ${ageSeconds.toFixed(1)}s exceeds max ${maxBlockhashAge}s, refreshing...`, enableLogging);
-            blockhashContext = await this.getFreshBlockhash(enableLogging);
+          if (ageSeconds > maxBlockhashAge && isLegacyTransaction(transaction)) {
+            this.logger.info(`Blockhash age ${ageSeconds.toFixed(1)}s exceeds max ${maxBlockhashAge}s, refreshing...`);
+            blockhashContext = await this.getFreshBlockhash();
             transaction.recentBlockhash = blockhashContext.blockhash;
             transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
             
@@ -98,43 +116,55 @@ export class SteroidTransaction {
           }
 
           // Broadcast transaction
-          signature = await (this.connection as any).sendRawTransaction(rawTransaction, {
-            skipPreflight: true,
-            maxRetries: 0, // We handle retries ourselves
-          });
+          this.logger.info(`Sending transaction (Attempt ${attempts})...`);
+          try {
+            const rawTransaction = serializeTransaction(transaction);
+            signature = await (this.connection as any).sendRawTransaction(rawTransaction, {
+              skipPreflight: true,
+              maxRetries: 0, // We handle retries ourselves
+            });
+            this.logger.info(`Transaction sent: ${signature}`);
+          } catch (sendError: any) {
+            if (isBlockhashExpiredError(sendError)) {
+              this.logger.warn('Blockhash expired during send, refreshing...');
+              lastBlockhashRefresh = 0; // Force refresh on next iteration
+              continue; // Skip to next iteration to refresh blockhash
+            }
+            throw sendError; // Re-throw other errors
+          }
 
           this.updateState(stateId, TransactionState.SENT, signature);
-          this.log('info', `Transaction sent: ${signature} (attempt ${state.attempts})`, enableLogging);
+          this.logger.info(`Transaction sent: ${signature} (attempt ${state.attempts})`);
 
           // 4. Multi-node confirmation check
+          this.logger.info(`Polling for confirmation on ${confirmationNodes} nodes...`);
           const confirmed = await this.pollForConfirmation(
             signature,
             confirmationCommitment,
-            confirmationNodes,
-            enableLogging
+            confirmationNodes
           );
 
           if (confirmed) {
             this.updateState(stateId, TransactionState.CONFIRMED, signature);
             state.confirmedAt = Date.now();
             const duration = ((state.confirmedAt - state.startTime) / 1000).toFixed(2);
-            this.log('info', `Transaction confirmed in ${duration}s after ${state.attempts} attempts`, enableLogging);
+            this.logger.info(`Transaction confirmed in ${duration}s after ${state.attempts} attempts`);
             return signature;
           }
 
-          this.log('warn', `Transaction not yet confirmed, will retry in ${retryInterval}ms...`, enableLogging);
+          this.logger.warn(`Transaction not yet confirmed, will retry in ${retryInterval}ms...`);
 
         } catch (error: any) {
           // Handle blockhash expiration
-          if (this.isBlockhashExpiredError(error)) {
-            this.log('warn', 'Blockhash expired or invalid, will refresh on next attempt', enableLogging);
+          if (isBlockhashExpiredError(error)) {
+            this.logger.warn('Blockhash expired or invalid, will refresh on next attempt');
             lastBlockhashRefresh = 0; // Force refresh on next iteration
           } else {
-            this.log('warn', `Broadcast attempt failed: ${error.message}`, enableLogging);
+            this.logger.warn(`Broadcast attempt failed: ${error.message}`);
           }
         }
 
-        await this.sleep(retryInterval);
+        await sleep(retryInterval);
       }
 
       // Timeout reached
@@ -143,8 +173,11 @@ export class SteroidTransaction {
       throw new Error(`[SteroidTransaction] ${errorMsg}. Last signature: ${signature || 'none'}`);
 
     } catch (error: any) {
+      this.logger.error('Transaction failed:', error.message);
       this.updateState(stateId, TransactionState.FAILED, state.signature, error.message);
       throw error;
+    } finally {
+      this.logger.setEnabled(false); // Reset logger state
     }
   }
 
@@ -153,23 +186,23 @@ export class SteroidTransaction {
    */
   private async simulateTransaction(
     transaction: Transaction | VersionedTransaction,
-    commitment: Commitment,
-    enableLogging: boolean
+    commitment: Commitment
   ): Promise<void> {
     try {
+      this.logger.info('Simulating transaction...');
       const simulation = await (this.connection as any).simulateTransaction(transaction, {
         commitment,
         replaceRecentBlockhash: true,
       });
 
       if (simulation.value.err) {
-        const errorDetails = this.parseSimulationError(simulation.value);
-        this.log('error', `Simulation failed: ${errorDetails}`, enableLogging);
+        const errorDetails = parseSimulationError(simulation.value);
+        this.logger.error(`Simulation failed: ${errorDetails}`);
         throw new Error(`[SteroidTransaction] Simulation failed: ${errorDetails}`);
       }
 
       if (simulation.value.logs) {
-        this.log('info', `Simulation succeeded. Logs count: ${simulation.value.logs.length}`, enableLogging);
+        this.logger.info(`Simulation succeeded. Logs count: ${simulation.value.logs.length}`);
       }
     } catch (error: any) {
       if (error.message?.includes('Simulation failed')) throw error;
@@ -183,13 +216,12 @@ export class SteroidTransaction {
   private async pollForConfirmation(
     signature: string,
     commitment: Commitment,
-    nodesToCheck: number,
-    enableLogging: boolean
+    nodesToCheck: number
   ): Promise<boolean> {
     const endpoints = this.connection.getEndpoints();
     const endpointsToCheck = endpoints.slice(0, Math.min(nodesToCheck, endpoints.length));
 
-    this.log('info', `Checking confirmation across ${endpointsToCheck.length} nodes...`, enableLogging);
+    this.logger.info(`Checking confirmation across ${endpointsToCheck.length} nodes...`);
 
     const checks = endpointsToCheck.map(async (url) => {
       try {
@@ -205,13 +237,13 @@ export class SteroidTransaction {
           status.value?.confirmationStatus === 'finalized';
 
         if (isConfirmed && status.value) {
-          this.log('info', `Transaction confirmed on ${url} (${status.value.confirmationStatus})`, enableLogging);
+          this.logger.info(`Transaction confirmed on ${url} (${status.value.confirmationStatus})`);
           return true;
         }
         
         return false;
       } catch (error: any) {
-        this.log('warn', `Confirmation check failed for ${url}: ${error.message}`, enableLogging);
+        this.logger.warn(`Confirmation check failed for ${url}: ${error.message}`);
         return false;
       }
     });
@@ -231,66 +263,15 @@ export class SteroidTransaction {
   /**
    * Get fresh blockhash with retry logic.
    */
-  private async getFreshBlockhash(enableLogging: boolean): Promise<BlockhashWithExpiryBlockHeight> {
+  private async getFreshBlockhash(): Promise<BlockhashWithExpiryBlockHeight> {
     try {
+      this.logger.info('Fetching fresh blockhash...');
       const { blockhash, lastValidBlockHeight } = await (this.connection as any).getLatestBlockhash('confirmed');
-      this.log('info', `Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`, enableLogging);
+      this.logger.info(`Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`);
       return { blockhash, lastValidBlockHeight };
     } catch (error: any) {
       throw new Error(`[SteroidTransaction] Failed to get blockhash: ${error.message}`);
     }
-  }
-
-  /**
-   * Parse simulation errors into human-readable format.
-   */
-  private parseSimulationError(simulationValue: any): string {
-    const logs = simulationValue.logs || [];
-    const errorLog = logs.find((l: string) => 
-      l.includes('Error:') || l.includes('failed') || l.includes('custom program error')
-    );
-
-    if (errorLog) return errorLog;
-
-    if (simulationValue.err) {
-      if (typeof simulationValue.err === 'string') return simulationValue.err;
-      if (simulationValue.err.InstructionError) {
-        const [index, error] = simulationValue.err.InstructionError;
-        return `Instruction ${index} failed: ${JSON.stringify(error)}`;
-      }
-      return JSON.stringify(simulationValue.err);
-    }
-
-    return 'Unknown simulation error';
-  }
-
-  private isBlockhashExpiredError(error: any): boolean {
-    return (
-      error instanceof TransactionExpiredBlockheightExceededError ||
-      error.message?.includes('block height exceeded') ||
-      error.message?.includes('blockhash not found')
-    );
-  }
-
-  /**
-   * Type guard for legacy transactions.
-   */
-  private isLegacyTransaction(transaction: Transaction | VersionedTransaction): transaction is Transaction {
-    return 'recentBlockhash' in transaction;
-  }
-
-  /**
-   * Serialize transaction to bytes.
-   */
-  private serializeTransaction(transaction: Transaction | VersionedTransaction): Buffer {
-    if (this.isLegacyTransaction(transaction)) {
-      return transaction.serialize();
-    }
-    return Buffer.from((transaction as VersionedTransaction).serialize());
-  }
-
-  private generateStateId(): string {
-    return `tx_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
   }
 
   private updateState(
@@ -305,29 +286,6 @@ export class SteroidTransaction {
       if (signature) existing.signature = signature;
       if (error) existing.error = error;
     }
-  }
-
-  private log(level: 'info' | 'warn' | 'error', message: string, enabled: boolean): void {
-    if (!enabled) return;
-
-    const prefix = '[SteroidTransaction]';
-    const formattedMessage = `${prefix} ${message}`;
-
-    switch (level) {
-      case 'info':
-        console.log(formattedMessage);
-        break;
-      case 'warn':
-        console.warn(formattedMessage);
-        break;
-      case 'error':
-        console.error(formattedMessage);
-        break;
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -348,11 +306,6 @@ export class SteroidTransaction {
    * Clear old transaction states (cleanup).
    */
   public clearOldStates(olderThanMs: number = 3600000): void {
-    const now = Date.now();
-    for (const [id, state] of this.transactionStates.entries()) {
-      if (now - state.startTime > olderThanMs) {
-        this.transactionStates.delete(id);
-      }
-    }
+    clearExpiredEntries(this.transactionStates, olderThanMs);
   }
 }

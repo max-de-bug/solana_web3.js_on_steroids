@@ -14,6 +14,7 @@ export declare class SteroidClient {
     private connection;
     private transactionEngine;
     private config;
+    private logger;
     private isDestroyed;
     /**
      * Initialize a new SteroidClient.
@@ -47,7 +48,6 @@ export declare class SteroidClient {
      */
     destroy(): void;
     private ensureNotDestroyed;
-    private log;
 }
 /**
  * Convenience factory function to create a SteroidClient.

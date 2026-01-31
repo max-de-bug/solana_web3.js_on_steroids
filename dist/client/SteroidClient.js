@@ -2,6 +2,7 @@ import { SteroidConnection } from '../connection/SteroidConnection.js';
 import { SteroidWallet } from '../wallet/SteroidWallet.js';
 import { SteroidTransaction } from '../transaction/SteroidTransaction.js';
 import { DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
+import { Logger } from '../utils/index.js';
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
  *
@@ -15,6 +16,7 @@ export class SteroidClient {
     connection;
     transactionEngine;
     config;
+    logger;
     isDestroyed = false;
     /**
      * Initialize a new SteroidClient.
@@ -36,9 +38,10 @@ export class SteroidClient {
             ],
             enableLogging: config.enableLogging ?? config.connection?.enableLogging ?? DEFAULT_CONFIG.CONNECTION.enableLogging,
         };
+        this.logger = new Logger('SteroidClient', config.enableLogging ?? false);
         this.connection = new SteroidConnection(primary, connectionConfig);
         this.transactionEngine = new SteroidTransaction(this.connection);
-        this.log('info', 'Initialized with endpoint(s):', endpoint);
+        this.logger.info('Initialized with endpoint(s):', endpoint);
     }
     /**
      * Connect a wallet to the Steroid reliability layer.
@@ -91,34 +94,11 @@ export class SteroidClient {
             return;
         this.connection.destroy();
         this.isDestroyed = true;
-        this.log('info', 'Destroyed');
+        this.logger.info('Destroyed');
     }
     ensureNotDestroyed() {
         if (this.isDestroyed) {
             throw new Error('[SteroidClient] Cannot execute operation: instance is already destroyed');
-        }
-    }
-    log(level, ...args) {
-        if (!this.config.enableLogging)
-            return;
-        const prefix = '[SteroidClient]';
-        const finalArgs = [...args];
-        if (typeof finalArgs[0] === 'string') {
-            finalArgs[0] = `${prefix} ${finalArgs[0]}`;
-        }
-        else {
-            finalArgs.unshift(prefix);
-        }
-        switch (level) {
-            case 'info':
-                console.log(...finalArgs);
-                break;
-            case 'warn':
-                console.warn(...finalArgs);
-                break;
-            case 'error':
-                console.error(...finalArgs);
-                break;
         }
     }
 }

@@ -1,5 +1,6 @@
 import { Connection } from '@solana/web3.js';
 import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
+import { sleep, Logger, calculateBackoff } from '../utils/index.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -8,7 +9,7 @@ import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.
  */
 export class SteroidConnection {
   private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
-  private static readonly MAX_BACKOFF_DELAY_MS = 10000;
+  private static readonly MAX_BACKOFF_DELAY_MS = 30000;
   private static readonly JITTER_MS = 100;
 
   private activeConnection: Connection;
@@ -22,6 +23,7 @@ export class SteroidConnection {
   private healthCheckTimer?: NodeJS.Timeout;
   private failoverCount: number = 0;
   private lastFailoverTime: number = 0;
+  private logger: Logger;
 
   constructor(endpoint: string, config: SteroidConnectionConfig = {}) {
     this.urls = [endpoint, ...(config.fallbacks || [])];
@@ -33,6 +35,7 @@ export class SteroidConnection {
       requestTimeout: config.requestTimeout ?? 30000,
       enableLogging: config.enableLogging ?? false,
     };
+    this.logger = new Logger('SteroidConnection', this.steroidConfig.enableLogging);
 
     // Initialize health status
     this.urls.forEach((url) => {
@@ -63,7 +66,16 @@ export class SteroidConnection {
 
         // 3. If it's a function, wrap it with retry/failover logic.
         if (typeof value === 'function') {
-          return (...args: any[]) => target.executeWithResilience(prop as string, value, args);
+          const methodName = prop as string;
+          
+          return (...args: any[]) => {
+            // Optimization: skip resilience for methods we know don't need it or are standard
+            if (['rpcEndpoint', 'commitment'].includes(methodName)) {
+              return value.apply(target.activeConnection, args);
+            }
+            
+            return target.executeWithResilience(methodName, value, args);
+          };
         }
 
         return value;
@@ -93,7 +105,7 @@ export class SteroidConnection {
         lastError = error.name === 'AbortError' ? new Error('Request timeout') : error;
         attemptedUrls.add(this.currentUrlIndex);
         
-        this.log('warn', `Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
+        this.logger.warn(`Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
 
         const shouldRetry = await this.handleExecutionError(lastError, methodName, attempt, attemptedUrls);
         if (!shouldRetry) {
@@ -151,18 +163,19 @@ export class SteroidConnection {
   private async handleExecutionError(error: any, methodName: string, attempt: number, attemptedUrls: Set<number>): Promise<boolean> {
     // 1. Transient Error (Rate limit, etc.) -> Just retry
     if (this.isTransientError(error)) {
-      const delay = this.calculateBackoff(attempt + 1);
-      this.log('info', `Retrying after ${delay}ms due to transient error`);
-      await this.sleep(delay);
+      const delay = calculateBackoff(attempt + 1, 1000, SteroidConnection.MAX_BACKOFF_DELAY_MS);
+      this.logger.info(`Retrying after ${delay.toFixed(0)}ms due to transient error`);
+      await sleep(delay);
       return true; 
     }
 
     // 2. Node Failure -> Mark unhealthy and try next if available
     if (this.isNodeFailure(error)) {
+      this.logger.error(`Node failure detected at ${this.getActiveEndpoint()}:`, error.message);
       this.updateHealthStatus(this.urls[this.currentUrlIndex], false);
 
       if (this.urls.length > 1 && attemptedUrls.size < this.urls.length) {
-        this.switchToNextRpc();
+        await this.switchToNextRpc(attemptedUrls);
         return true;
       }
     }
@@ -221,8 +234,8 @@ export class SteroidConnection {
   /**
    * Switches to the next available RPC node.
    */
-  private switchToNextRpc(): void {
-    const nextIndex = this.findNextAvailableRpcIndex();
+  private async switchToNextRpc(attemptedUrls: Set<number>): Promise<void> {
+    const nextIndex = this.findNextAvailableRpcIndex(attemptedUrls);
     const previousUrl = this.urls[this.currentUrlIndex];
     const nextUrl = this.urls[nextIndex];
 
@@ -230,7 +243,7 @@ export class SteroidConnection {
     this.failoverCount++;
     this.lastFailoverTime = Date.now();
     
-    this.log('warn', `Failover triggered (#${this.failoverCount}). Switching from ${previousUrl} to ${nextUrl}`);
+    this.logger.warn(`Failover triggered (#${this.failoverCount}). Switching from ${previousUrl} to ${nextUrl}`);
 
     // Recreate the connection to clear internal state/websockets
     this.activeConnection = new Connection(nextUrl, this.config);
@@ -239,30 +252,21 @@ export class SteroidConnection {
   /**
    * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
    */
-  private findNextAvailableRpcIndex(): number {
+  private findNextAvailableRpcIndex(attemptedUrls: Set<number>): number {
     const startIndex = (this.currentUrlIndex + 1) % this.urls.length;
     
     // 1. Try to find the next healthy RPC starting from the next in line
     for (let i = 0; i < this.urls.length; i++) {
       const index = (startIndex + i) % this.urls.length;
-      if (this.healthStatus.get(this.urls[index])?.healthy) {
+      // Only consider URLs not yet attempted in the current resilience loop
+      if (!attemptedUrls.has(index) && this.healthStatus.get(this.urls[index])?.healthy) {
         return index;
       }
     }
     
-    // 2. Fallback: if all are unhealthy, just try the very next one in the list
+    // 2. Fallback: if all healthy nodes have been attempted or none are healthy,
+    // just try the very next one in the list (round-robin)
     return startIndex;
-  }
-
-  private calculateBackoff(attempt: number): number {
-    const baseDelay = this.steroidConfig.retryDelay;
-    const exponentialDelay = baseDelay * Math.pow(2, attempt - 1);
-    const jitter = Math.random() * SteroidConnection.JITTER_MS;
-    return Math.min(exponentialDelay + jitter, SteroidConnection.MAX_BACKOFF_DELAY_MS);
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private enhanceError(error: any, methodName: string, attempts: number): Error {
@@ -277,27 +281,7 @@ export class SteroidConnection {
   }
 
   private log(level: 'info' | 'warn' | 'error', ...args: any[]): void {
-    if (!this.steroidConfig.enableLogging) return;
-
-    const prefix = '[SteroidConnection]';
-    const finalArgs = [...args];
-    if (typeof finalArgs[0] === 'string') {
-      finalArgs[0] = `${prefix} ${finalArgs[0]}`;
-    } else {
-      finalArgs.unshift(prefix);
-    }
-
-    switch (level) {
-      case 'info':
-        console.log(...finalArgs);
-        break;
-      case 'warn':
-        console.warn(...finalArgs);
-        break;
-      case 'error':
-        console.error(...finalArgs);
-        break;
-    }
+    this.logger.log(level, ...args);
   }
 
   /**

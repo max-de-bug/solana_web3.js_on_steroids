@@ -17,6 +17,7 @@ export declare class SteroidConnection {
     private healthCheckTimer?;
     private failoverCount;
     private lastFailoverTime;
+    private logger;
     constructor(endpoint: string, config?: SteroidConnectionConfig);
     /**
      * Executes a connection method with intelligent retries and failover.
@@ -53,8 +54,6 @@ export declare class SteroidConnection {
      * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
      */
     private findNextAvailableRpcIndex;
-    private calculateBackoff;
-    private sleep;
     private enhanceError;
     private log;
     /**

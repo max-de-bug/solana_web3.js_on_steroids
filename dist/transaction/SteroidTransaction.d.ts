@@ -8,6 +8,7 @@ import { SteroidSendOptions, TransactionStateInfo } from '../types/SteroidWallet
 export declare class SteroidTransaction {
     private connection;
     private transactionStates;
+    private logger;
     constructor(connection: SteroidConnection);
     /**
      * Sends a transaction with continuous re-broadcasting and multi-node monitoring.
@@ -26,23 +27,7 @@ export declare class SteroidTransaction {
      * Get fresh blockhash with retry logic.
      */
     private getFreshBlockhash;
-    /**
-     * Parse simulation errors into human-readable format.
-     */
-    private parseSimulationError;
-    private isBlockhashExpiredError;
-    /**
-     * Type guard for legacy transactions.
-     */
-    private isLegacyTransaction;
-    /**
-     * Serialize transaction to bytes.
-     */
-    private serializeTransaction;
-    private generateStateId;
     private updateState;
-    private log;
-    private sleep;
     /**
      * Get the current state of a transaction.
      */
