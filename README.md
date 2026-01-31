@@ -4,7 +4,7 @@
 
 Solana UX today is fragile: wallet adapters leak abstractions, RPC behavior is inconsistent, and many integrations fall short of production-grade reliability. **Solana on Steroids** treats crypto UX correctness as a systems problem, making network instability and RPC variability invisible to your users.
 
-[![NPM Version](https://img.shields.io/npm/v/solana-web3.js-on_steroids)](https://www.npmjs.com/package/solana-web3.js-on_steroids)
+[![NPM Version](https://img.shields.io/npm/v/solana-web3-on-steroids)](https://www.npmjs.com/package/solana-web3-on-steroids)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
@@ -38,13 +38,13 @@ Intercepts simulation logs and translates raw program errors into human-readable
 ## 🚀 Installation
 
 ```bash
-npm install solana-web3.js-on_steroids
+npm install solana-web3-on-steroids
 ```
 
 ## 🛠 Quick Start
 
 ```typescript
-import { SteroidClient } from 'solana-web3.js-on_steroids';
+import { SteroidClient } from 'solana-web3-on-steroids';
 
 const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
   fallbacks: [
