@@ -1,0 +1,293 @@
+<svg viewBox="0 0 1400 900" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="appGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="steroidsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9945FF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#14F195;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="infraGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f093fb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f5576c;stop-opacity:1" />
+    </linearGradient>
+    
+    <!-- Arrow markers -->
+    <marker id="arrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333333"/>
+    </marker>
+    
+    <marker id="arrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#666666"/>
+    </marker>
+    
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#14F195"/>
+    </marker>
+    
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#9945FF"/>
+    </marker>
+    
+    <!-- Drop shadow -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.2"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1400" height="900" fill="#F8FAFC"/>
+  
+  <!-- Grid pattern -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E2E8F0" stroke-width="1" opacity="0.5"/>
+  </pattern>
+  <rect width="1400" height="900" fill="url(#grid)"/>
+  
+  <!-- ==================== APPLICATION LAYER ==================== -->
+  <g id="application-layer">
+    <!-- Layer background -->
+    <rect x="50" y="50" width="1300" height="150" rx="16" fill="#FFFFFF" stroke="url(#appGrad)" stroke-width="3" opacity="0.1"/>
+    <rect x="50" y="50" width="1300" height="150" rx="16" fill="none" stroke="url(#appGrad)" stroke-width="3"/>
+    
+    <!-- Layer title -->
+    <text x="70" y="85" font-family="'SF Pro Display', system-ui, sans-serif" font-size="18" font-weight="700" fill="url(#appGrad)">
+      Application Layer
+    </text>
+    
+    <!-- App node -->
+    <g id="app-node" filter="url(#shadow)">
+      <rect x="550" y="110" width="300" height="70" rx="12" fill="#FFFFFF" stroke="#667eea" stroke-width="3"/>
+      <text x="700" y="145" font-family="'SF Pro Display', system-ui, sans-serif" font-size="20" font-weight="700" fill="#1E293B" text-anchor="middle">
+        Your dApp
+      </text>
+      <text x="700" y="165" font-family="'SF Pro Text', system-ui, sans-serif" font-size="12" fill="#64748B" text-anchor="middle">
+        Application Code
+      </text>
+    </g>
+  </g>
+  
+  <!-- ==================== STEROIDS RESILIENCE LAYER ==================== -->
+  <g id="steroids-layer">
+    <!-- Layer background -->
+    <rect x="50" y="250" width="1300" height="380" rx="16" fill="#FFFFFF" stroke="url(#steroidsGrad)" stroke-width="3" opacity="0.1"/>
+    <rect x="50" y="250" width="1300" height="380" rx="16" fill="none" stroke="url(#steroidsGrad)" stroke-width="3"/>
+    
+    <!-- Layer title -->
+    <text x="70" y="285" font-family="'SF Pro Display', system-ui, sans-serif" font-size="18" font-weight="700" fill="url(#steroidsGrad)">
+      Steroids Resilience Layer
+    </text>
+    
+    <!-- SteroidClient -->
+    <g id="client-node" filter="url(#shadow)">
+      <rect x="550" y="320" width="300" height="70" rx="12" fill="#FFFFFF" stroke="#9945FF" stroke-width="3"/>
+      <circle cx="575" cy="355" r="6" fill="#9945FF" filter="url(#glow)"/>
+      <text x="700" y="350" font-family="'SF Pro Display', system-ui, sans-serif" font-size="18" font-weight="700" fill="#1E293B" text-anchor="middle">
+        SteroidClient
+      </text>
+      <text x="700" y="370" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
+        Main Entry Point
+      </text>
+    </g>
+    
+    <!-- SteroidConnection Proxy -->
+    <g id="conn-node" filter="url(#shadow)">
+      <rect x="100" y="450" width="280" height="70" rx="12" fill="#FFFFFF" stroke="#14F195" stroke-width="3"/>
+      <circle cx="125" cy="485" r="6" fill="#14F195" filter="url(#glow)"/>
+      <text x="240" y="480" font-family="'SF Pro Display', system-ui, sans-serif" font-size="17" font-weight="700" fill="#1E293B" text-anchor="middle">
+        SteroidConnection
+      </text>
+      <text x="240" y="500" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
+        Proxy Pattern
+      </text>
+    </g>
+    
+    <!-- SteroidTransaction Engine -->
+    <g id="tx-node" filter="url(#shadow)">
+      <rect x="440" y="450" width="280" height="70" rx="12" fill="#FFFFFF" stroke="#FF6B9D" stroke-width="3"/>
+      <circle cx="465" cy="485" r="6" fill="#FF6B9D" filter="url(#glow)"/>
+      <text x="580" y="480" font-family="'SF Pro Display', system-ui, sans-serif" font-size="17" font-weight="700" fill="#1E293B" text-anchor="middle">
+        SteroidTransaction
+      </text>
+      <text x="580" y="500" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
+        Submission Engine
+      </text>
+    </g>
+    
+    <!-- SteroidWallet Wrapper -->
+    <g id="wallet-node" filter="url(#shadow)">
+      <rect x="780" y="450" width="280" height="70" rx="12" fill="#FFFFFF" stroke="#FFA500" stroke-width="3"/>
+      <circle cx="805" cy="485" r="6" fill="#FFA500" filter="url(#glow)"/>
+      <text x="920" y="480" font-family="'SF Pro Display', system-ui, sans-serif" font-size="17" font-weight="700" fill="#1E293B" text-anchor="middle">
+        SteroidWallet
+      </text>
+      <text x="920" y="500" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
+        Wallet Wrapper
+      </text>
+    </g>
+    
+    <!-- Internal connections within Steroids layer -->
+    <!-- Client to Connection -->
+    <path d="M 650 390 L 300 450" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+    
+    <!-- Client to Transaction -->
+    <path d="M 670 390 L 600 450" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+    
+    <!-- Client to Wallet -->
+    <path d="M 750 390 L 880 450" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+    
+    <!-- Transaction to Connection (dashed) -->
+    <path d="M 520 450 L 340 480" stroke="#666666" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
+    
+    <!-- Wallet to Transaction (dashed) -->
+    <path d="M 820 450 L 670 470" stroke="#666666" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
+  </g>
+  
+  <!-- ==================== INFRASTRUCTURE LAYER (RPC) ==================== -->
+  <g id="infra-layer">
+    <!-- Layer background -->
+    <rect x="50" y="680" width="1300" height="170" rx="16" fill="#FFFFFF" stroke="url(#infraGrad)" stroke-width="3" opacity="0.1"/>
+    <rect x="50" y="680" width="1300" height="170" rx="16" fill="none" stroke="url(#infraGrad)" stroke-width="3"/>
+    
+    <!-- Layer title -->
+    <text x="70" y="715" font-family="'SF Pro Display', system-ui, sans-serif" font-size="18" font-weight="700" fill="url(#infraGrad)">
+      Infrastructure Layer (RPC)
+    </text>
+    
+    <!-- Primary RPC Node -->
+    <g id="primary-node" filter="url(#shadow)">
+      <rect x="120" y="750" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#10B981" stroke-width="3"/>
+      <circle cx="145" cy="785" r="7" fill="#10B981" filter="url(#glow)"/>
+      <text x="240" y="780" font-family="'SF Pro Display', system-ui, sans-serif" font-size="16" font-weight="700" fill="#1E293B" text-anchor="middle">
+        Primary RPC Node
+      </text>
+      <text x="240" y="800" font-family="'SF Mono', monospace" font-size="10" fill="#64748B" text-anchor="middle">
+        Active
+      </text>
+    </g>
+    
+    <!-- Fallback Node 1 -->
+    <g id="fallback1-node" filter="url(#shadow)">
+      <rect x="400" y="750" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#3B82F6" stroke-width="3"/>
+      <circle cx="425" cy="785" r="7" fill="#3B82F6" filter="url(#glow)"/>
+      <text x="520" y="780" font-family="'SF Pro Display', system-ui, sans-serif" font-size="16" font-weight="700" fill="#1E293B" text-anchor="middle">
+        Fallback Node 1
+      </text>
+      <text x="520" y="800" font-family="'SF Mono', monospace" font-size="10" fill="#64748B" text-anchor="middle">
+        Standby
+      </text>
+    </g>
+    
+    <!-- Fallback Node 2 -->
+    <g id="fallback2-node" filter="url(#shadow)">
+      <rect x="680" y="750" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#3B82F6" stroke-width="3"/>
+      <circle cx="705" cy="785" r="7" fill="#3B82F6" filter="url(#glow)"/>
+      <text x="800" y="780" font-family="'SF Pro Display', system-ui, sans-serif" font-size="16" font-weight="700" fill="#1E293B" text-anchor="middle">
+        Fallback Node 2
+      </text>
+      <text x="800" y="800" font-family="'SF Mono', monospace" font-size="10" fill="#64748B" text-anchor="middle">
+        Standby
+      </text>
+    </g>
+    
+    <!-- Confirmation Nodes -->
+    <g id="confirm-nodes" filter="url(#shadow)">
+      <rect x="960" y="750" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#F59E0B" stroke-width="3"/>
+      <circle cx="985" cy="785" r="7" fill="#F59E0B" filter="url(#glow)"/>
+      <text x="1080" y="780" font-family="'SF Pro Display', system-ui, sans-serif" font-size="16" font-weight="700" fill="#1E293B" text-anchor="middle">
+        Confirmation Nodes
+      </text>
+      <text x="1080" y="800" font-family="'SF Mono', monospace" font-size="10" fill="#64748B" text-anchor="middle">
+        Multi-node Polling
+      </text>
+    </g>
+  </g>
+  
+  <!-- ==================== CROSS-LAYER CONNECTIONS ==================== -->
+  
+  <!-- App to Client -->
+  <path d="M 700 180 L 700 320" stroke="#667eea" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+  
+  <!-- Connection to Primary (Health Checks & Failover) -->
+  <path d="M 240 520 L 240 750" stroke="#14F195" stroke-width="2.5" fill="none" marker-end="url(#arrowGreen)"/>
+  <text x="250" y="640" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" font-weight="600">
+    Health Checks
+  </text>
+  <text x="250" y="655" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" font-weight="600">
+    &amp; Failover
+  </text>
+  
+  <!-- Connection to Fallback 1 (Automatic Swap) -->
+  <path d="M 320 520 L 480 750" stroke="#3B82F6" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowSolid)"/>
+  <text x="350" y="650" font-family="'SF Pro Text', system-ui, sans-serif" font-size="10" fill="#64748B" font-style="italic">
+    Automatic Swap
+  </text>
+  
+  <!-- Connection to Fallback 2 (Automatic Swap) -->
+  <path d="M 340 520 L 720 750" stroke="#3B82F6" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowSolid)"/>
+  
+  <!-- Transaction to Primary (Re-broadcasting) -->
+  <path d="M 520 520 L 280 750" stroke="#FF6B9D" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+  <text x="340" y="640" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" font-weight="600">
+    Re-broadcasting
+  </text>
+  
+  <!-- Transaction to Confirmation Nodes (Multi-node Polling) -->
+  <path d="M 650 520 L 1050 750" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+  <text x="820" y="640" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" font-weight="600">
+    Multi-node Polling
+  </text>
+  
+  <!-- Legend -->
+  <g id="legend">
+    <rect x="1120" y="320" width="220" height="140" rx="10" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="2" filter="url(#shadow)"/>
+    <text x="1140" y="345" font-family="'SF Pro Display', system-ui, sans-serif" font-size="13" font-weight="700" fill="#1E293B">
+      Legend
+    </text>
+    
+    <!-- Solid arrow -->
+    <line x1="1140" y1="365" x2="1180" y2="365" stroke="#333333" stroke-width="2.5" marker-end="url(#arrowSolid)"/>
+    <text x="1190" y="370" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B">
+      Direct connection
+    </text>
+    
+    <!-- Dashed arrow -->
+    <line x1="1140" y1="390" x2="1180" y2="390" stroke="#666666" stroke-width="2" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
+    <text x="1190" y="395" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B">
+      Internal reference
+    </text>
+    
+    <!-- Active indicator -->
+    <circle cx="1150" cy="415" r="5" fill="#10B981"/>
+    <text x="1165" y="420" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B">
+      Active node
+    </text>
+    
+    <!-- Standby indicator -->
+    <circle cx="1150" cy="440" r="5" fill="#3B82F6"/>
+    <text x="1165" y="445" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B">
+      Standby node
+    </text>
+  </g>
+</svg>
