@@ -39,9 +39,7 @@ Intercepts simulation logs and translates raw program errors into human-readable
 
 ![Architecture Diagram](docs/assets/architecture.png)
 
-### Technical Resilience Flow
-
-![Technical Flow](docs/assets/technical_flow.png)
+---
 
 ### Technical Resilience Flow
 
