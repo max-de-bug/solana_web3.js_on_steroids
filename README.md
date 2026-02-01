@@ -35,6 +35,49 @@ Intercepts simulation logs and translates raw program errors into human-readable
 
 ---
 
+## 🗺 Architecture Overview
+
+![Architecture Diagram](docs/assets/architecture.png)
+
+### Technical Resilience Flow (Mermaid)
+
+```mermaid
+graph TD
+    subgraph "Application Layer"
+        App[Your dApp]
+    end
+
+    subgraph "Steroids Resilience Layer"
+        Client[SteroidClient]
+        Conn[SteroidConnection Proxy]
+        Tx[SteroidTransaction Engine]
+        Wallet[SteroidWallet Wrapper]
+        
+        Client --> Conn
+        Client --> Tx
+        Client --> Wallet
+        
+        Tx -.-> Conn
+        Wallet -.-> Tx
+    end
+
+    subgraph "Infrastucture Layer (RPC)"
+        Primary[Primary RPC Node]
+        F1[Fallback Node 1]
+        F2[Fallback Node 2]
+        CNodes[Confirmation Nodes]
+    end
+
+    App --> Client
+    Conn -- "Health Checks & Failover" --> Primary
+    Conn -- "Automatic Swap" --> F1
+    Conn -- "Automatic Swap" --> F2
+    Tx -- "Re-broadcasting" --> Primary
+    Tx -- "Multi-node Polling" --> CNodes
+```
+
+---
+
 ## 🚀 Installation
 
 ```bash
