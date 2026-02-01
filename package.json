@@ -1,6 +1,6 @@
 {
   "name": "solana-web3-on-steroids",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "A systems-grade resilience layer for Solana web3.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,8 +15,13 @@
     "transaction",
     "rpc"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/max-de-bug/solana_web3.js_on_steroids.git"
+  },
   "files": [
     "dist",
+    "docs",
     "LICENSE",
     "README.md"
   ],
