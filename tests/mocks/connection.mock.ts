@@ -28,6 +28,9 @@ export function createMockConnection(overrides: Partial<Connection> = {}): Conne
     confirmTransaction: vi.fn().mockResolvedValue({
       value: { err: null },
     }),
+    getRecentPrioritizationFees: vi.fn().mockResolvedValue([
+      { prioritizationFee: 1000 },
+    ]),
     ...overrides,
   };
 
@@ -63,6 +66,7 @@ export function createFailingMockConnection(
     getSignatureStatus: vi.fn().mockResolvedValue({
       value: { confirmationStatus: 'confirmed', err: null },
     }),
+    getRecentPrioritizationFees: vi.fn().mockResolvedValue([{ prioritizationFee: 0 }]),
   } as unknown as Connection;
 }
 
@@ -86,6 +90,7 @@ export function createRateLimitedMockConnection(rateLimitUntilAttempt: number): 
       blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
       lastValidBlockHeight: 100000,
     }),
+    getRecentPrioritizationFees: vi.fn().mockResolvedValue([{ prioritizationFee: 0 }]),
   } as unknown as Connection;
 }
 

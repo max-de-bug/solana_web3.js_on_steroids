@@ -5,10 +5,9 @@ import {
   VersionedTransaction,
   Commitment,
   BlockhashWithExpiryBlockHeight,
-
 } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
-import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
+import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CONFIG, ComputeBudgetConfig } from '../types/SteroidWalletTypes.js';
 import { 
   isLegacyTransaction, 
   sleep, 
@@ -19,6 +18,8 @@ import {
   generateId, 
   clearExpiredEntries 
 } from '../utils/index.js';
+import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
+import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
 
 /**
  * Enhanced transaction handling with state management, automatic retries,
@@ -28,9 +29,13 @@ export class SteroidTransaction {
   private connection: SteroidConnection;
   private transactionStates: Map<string, TransactionStateInfo> = new Map();
   private logger: Logger;
+  private emitter?: SteroidEventEmitter;
+  private computeOptimizer: ComputeBudgetOptimizer;
 
-  constructor(connection: SteroidConnection) {
+  constructor(connection: SteroidConnection, emitter?: SteroidEventEmitter) {
     this.connection = connection;
+    this.emitter = emitter;
+    this.computeOptimizer = new ComputeBudgetOptimizer(connection);
     this.logger = new Logger('SteroidTransaction', false);
   }
 
@@ -73,13 +78,31 @@ export class SteroidTransaction {
       startTime: Date.now(),
     };
     this.transactionStates.set(stateId, state);
+    this.emitter?.emit('transaction:pending', { stateId });
 
     try {
+      // 0. Apply compute budget optimization if enabled
+      let computeUnitsEstimated: number | undefined;
+      const isSigned = isLegacyTransaction(transaction) 
+        ? transaction.signatures.some(s => s.signature !== null)
+        : (transaction as VersionedTransaction).signatures.length > 0;
+
+      if (mergedOptions.computeBudget !== false && isLegacyTransaction(transaction) && !isSigned) {
+        const budgetConfig: ComputeBudgetConfig = 
+          typeof mergedOptions.computeBudget === 'object' 
+            ? mergedOptions.computeBudget 
+            : {};
+        const estimate = await this.computeOptimizer.estimateComputeBudget(transaction, budgetConfig);
+        computeUnitsEstimated = estimate.computeUnits;
+        transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
+      }
+
       // 1. Simulation with detailed error parsing
       if (!skipPreflight) {
         this.updateState(stateId, TransactionState.PENDING);
         await this.simulateTransaction(transaction, preflightCommitment);
         this.updateState(stateId, TransactionState.SIMULATED);
+        this.emitter?.emit('transaction:simulated', { stateId, computeUnits: computeUnitsEstimated });
       }
 
       // 2. Initial blockhash setup if needed
@@ -134,6 +157,7 @@ export class SteroidTransaction {
           }
 
           this.updateState(stateId, TransactionState.SENT, signature);
+          this.emitter?.emit('transaction:sent', { stateId, signature, attempt: attempts });
           this.logger.info(`Transaction sent: ${signature} (attempt ${state.attempts})`);
 
           // 4. Multi-node confirmation check
@@ -147,8 +171,14 @@ export class SteroidTransaction {
           if (confirmed) {
             this.updateState(stateId, TransactionState.CONFIRMED, signature);
             state.confirmedAt = Date.now();
-            const duration = ((state.confirmedAt - state.startTime) / 1000).toFixed(2);
-            this.logger.info(`Transaction confirmed in ${duration}s after ${state.attempts} attempts`);
+            const durationMs = state.confirmedAt - state.startTime;
+            this.emitter?.emit('transaction:confirmed', { 
+              stateId, 
+              signature, 
+              attempts: state.attempts,
+              durationMs 
+            });
+            this.logger.info(`Transaction confirmed in ${(durationMs / 1000).toFixed(2)}s after ${state.attempts} attempts`);
             return signature;
           }
 
@@ -170,11 +200,13 @@ export class SteroidTransaction {
       // Timeout reached
       const errorMsg = `Transaction not confirmed within ${timeoutSeconds}s after ${state.attempts} attempts`;
       this.updateState(stateId, TransactionState.EXPIRED, signature, errorMsg);
+      this.emitter?.emit('transaction:expired', { stateId, signature: signature || undefined, attempts: state.attempts });
       throw new Error(`[SteroidTransaction] ${errorMsg}. Last signature: ${signature || 'none'}`);
 
     } catch (error: any) {
       this.logger.error('Transaction failed:', error.message);
       this.updateState(stateId, TransactionState.FAILED, state.signature, error.message);
+      this.emitter?.emit('transaction:failed', { stateId, error, attempts: state.attempts });
       throw error;
     } finally {
       this.logger.setEnabled(false); // Reset logger state

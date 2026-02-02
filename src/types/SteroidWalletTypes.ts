@@ -48,6 +48,22 @@ lastTime: number;
 
 }
 
+/**
+ * Configuration for compute budget optimization.
+ */
+export interface ComputeBudgetConfig {
+  /** Safety margin multiplier for compute units (default: 1.2 = 20% buffer) */
+  unitMargin?: number;
+  /** Percentile of recent priority fees to use (default: 75) */
+  feePercentile?: number;
+  /** Maximum priority fee in microLamports (default: 1_000_000) */
+  maxPriorityFee?: number;
+  /** Enable priority fee injection (default: true) */
+  enablePriorityFees?: boolean;
+  /** Enable compute unit limit injection (default: true) */
+  enableComputeUnitLimit?: boolean;
+}
+
 export interface SteroidSendOptions extends SendOptions {
   timeoutSeconds?: number;
   retryInterval?: number;
@@ -55,6 +71,13 @@ export interface SteroidSendOptions extends SendOptions {
   maxBlockhashAge?: number;
   enableLogging?: boolean;
   confirmationNodes?: number;
+  /** 
+   * Compute budget optimization config.
+   * - true: Enable with defaults
+   * - false: Disable
+   * - ComputeBudgetConfig: Custom configuration
+   */
+  computeBudget?: boolean | ComputeBudgetConfig;
 }
 
 export enum TransactionState {

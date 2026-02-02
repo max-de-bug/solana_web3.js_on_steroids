@@ -1,6 +1,7 @@
 import { Connection } from '@solana/web3.js';
 import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
 import { sleep, Logger, calculateBackoff } from '../utils/index.js';
+import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -24,10 +25,12 @@ export class SteroidConnection {
   private failoverCount: number = 0;
   private lastFailoverTime: number = 0;
   private logger: Logger;
+  private emitter?: SteroidEventEmitter;
 
-  constructor(endpoint: string, config: SteroidConnectionConfig = {}) {
+  constructor(endpoint: string, config: SteroidConnectionConfig = {}, emitter?: SteroidEventEmitter) {
     this.urls = [endpoint, ...(config.fallbacks || [])];
     this.config = config;
+    this.emitter = emitter;
     this.steroidConfig = {
       maxRetries: config.maxRetries ?? 5,
       retryDelay: config.retryDelay ?? 500,
@@ -244,6 +247,11 @@ export class SteroidConnection {
     this.lastFailoverTime = Date.now();
     
     this.logger.warn(`Failover triggered (#${this.failoverCount}). Switching from ${previousUrl} to ${nextUrl}`);
+    this.emitter?.emit('connection:failover', { 
+      from: previousUrl, 
+      to: nextUrl, 
+      reason: 'Node failure detected' 
+    });
 
     // Recreate the connection to clear internal state/websockets
     this.activeConnection = new Connection(nextUrl, this.config);
@@ -310,9 +318,11 @@ export class SteroidConnection {
       
       const latency = Date.now() - startTime;
       this.updateHealthStatus(url, true, latency);
+      this.emitter?.emit('connection:health', { endpoint: url, healthy: true, latency });
       this.log('info', `Health check passed for ${url} (${latency}ms)`);
     } catch (error: any) {
       this.updateHealthStatus(url, false);
+      this.emitter?.emit('connection:health', { endpoint: url, healthy: false });
       this.log('warn', `Health check failed for ${url}:`, error.message);
     }
   }

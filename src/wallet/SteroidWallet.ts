@@ -13,6 +13,8 @@ import {
   SteroidSendOptions 
 } from '../types/SteroidWalletTypes.js';
 import { isLegacyTransaction, Logger, normalizeWalletError } from '../utils/index.js';
+import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 
 export class WalletError extends Error {
   constructor(
@@ -38,17 +40,22 @@ export class SteroidWallet {
   private txEngine: SteroidTransaction;
   private config: Required<SteroidWalletConfig>;
   private logger: Logger;
+  private computeOptimizer: ComputeBudgetOptimizer;
+  private emitter?: SteroidEventEmitter;
   private networkValidated: boolean = false;
   private genesisHash?: string;
 
   constructor(
     wallet: WalletInterface,
     connection: SteroidConnection,
-    config: SteroidWalletConfig = {}
+    config: SteroidWalletConfig = {},
+    emitter?: SteroidEventEmitter
   ) {
     this.wallet = wallet;
     this.connection = connection;
-    this.txEngine = new SteroidTransaction(connection);
+    this.emitter = emitter;
+    this.txEngine = new SteroidTransaction(connection, emitter);
+    this.computeOptimizer = new ComputeBudgetOptimizer(connection);
     this.config = {
       validateNetwork: config.validateNetwork ?? true,
       expectedGenesisHash: config.expectedGenesisHash ?? '',
@@ -81,6 +88,12 @@ export class SteroidWallet {
       // Refresh blockhash if needed
       if (this.config.autoRefreshBlockhash && isLegacyTransaction(transaction)) {
         await this.ensureFreshBlockhash(transaction);
+      }
+
+      // Apply compute budget optimization if enabled
+      if (options.computeBudget !== false && isLegacyTransaction(transaction)) {
+        const budgetConfig = typeof options.computeBudget === 'object' ? options.computeBudget : {};
+        transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
       }
 
       // Sign transaction

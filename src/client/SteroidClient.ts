@@ -11,6 +11,7 @@ import {
   DEFAULT_CONFIG
 } from '../types/SteroidWalletTypes.js';
 import { Logger } from '../utils/index.js';
+import { SteroidEventEmitter, SteroidEventMap } from '../events/SteroidEventEmitter.js';
 
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
@@ -26,6 +27,7 @@ export class SteroidClient {
   private transactionEngine: SteroidTransaction;
   private config: SteroidClientConfig;
   private logger: Logger;
+  private events: SteroidEventEmitter;
   private isDestroyed: boolean = false;
 
   /**
@@ -52,8 +54,10 @@ export class SteroidClient {
     };
 
     this.logger = new Logger('SteroidClient', config.enableLogging ?? false);
-    this.connection = new SteroidConnection(primary, connectionConfig);
-    this.transactionEngine = new SteroidTransaction(this.connection);
+    this.events = new SteroidEventEmitter();
+    
+    this.connection = new SteroidConnection(primary, connectionConfig, this.events);
+    this.transactionEngine = new SteroidTransaction(this.connection, this.events);
     
     this.logger.info('Initialized with endpoint(s):', endpoint);
   }
@@ -78,7 +82,7 @@ export class SteroidClient {
       enableLogging: this.config.enableLogging ?? walletConfig.enableLogging ?? DEFAULT_CONFIG.WALLET.enableLogging,
     };
 
-    return new SteroidWallet(wallet, this.connection, mergedConfig);
+    return new SteroidWallet(wallet, this.connection, mergedConfig, this.events);
   }
 
   /**
@@ -87,6 +91,39 @@ export class SteroidClient {
   public getTransactionEngine(): SteroidTransaction {
     this.ensureNotDestroyed();
     return this.transactionEngine;
+  }
+
+  /**
+   * Subscribe to client events (transactions, connection, health).
+   */
+  public on<K extends keyof SteroidEventMap>(
+    event: K,
+    listener: (data: SteroidEventMap[K]) => void
+  ): this {
+    this.events.on(event, listener);
+    return this;
+  }
+
+  /**
+   * Unsubscribe from client events.
+   */
+  public off<K extends keyof SteroidEventMap>(
+    event: K,
+    listener: (data: SteroidEventMap[K]) => void
+  ): this {
+    this.events.off(event, listener);
+    return this;
+  }
+
+  /**
+   * Subscribe to a client event once.
+   */
+  public once<K extends keyof SteroidEventMap>(
+    event: K,
+    listener: (data: SteroidEventMap[K]) => void
+  ): this {
+    this.events.once(event, listener);
+    return this;
   }
 
   /**

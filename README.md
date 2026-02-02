@@ -30,8 +30,11 @@ Doesn't trust a single node's word. It polls multiple RPC providers simultaneous
 ### 3. Continuous Re-broadcasting Loop
 Transactions are "babysat" by an engine that refreshes blockhashes and re-broadcasts automatically until a definitive landing or expiration occurs.
 
-### 4. Intelligent Simulation Parsing
-Intercepts simulation logs and translates raw program errors into human-readable insights *before* the user even signs.
+### 4. Reactive Event Emitter (Reactive UI)
+Exposes an internal event system (Push-based) so your UI can react instantly to re-broadcasts, RPC failovers, and confirmation progress without polling state.
+
+### 5. Dynamic Priority Fee Optimization
+Automatically measures compute unit consumption via simulation and fetches network-wide priority fee percentiles to inject optimal `ComputeBudget` instructions during congestion.
 
 ---
 
@@ -72,7 +75,21 @@ const balance = await client.connection.getBalance(myPublicKey);
 
 // Connect a wallet adapter for steroidal transactions
 const steroidWallet = client.connectWallet(walletAdapter);
-const signature = await steroidWallet.signAndSend(transaction);
+
+// Listen to real-time events for reactive UX
+client.on('transaction:sent', ({ signature, attempt }) => {
+  console.log(`Transaction ${signature} sent (Attempt ${attempt})`);
+});
+
+client.on('connection:failover', ({ from, to }) => {
+  console.warn(`RPC Failover: Switching from ${from} to ${to}`);
+});
+
+// Send with automatic priority fee optimization
+const signature = await steroidWallet.signAndSend(transaction, {
+  computeBudget: { feePercentile: 75 } // Target 75th percentile for fast landing
+});
+
 ```
 
 ## 🧬 Core Architecture
