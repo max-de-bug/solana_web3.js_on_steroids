@@ -14,16 +14,61 @@ import {
 } from '../types/SteroidWalletTypes.js';
 import { isLegacyTransaction, Logger, normalizeWalletError } from '../utils/index.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { SteroidError, ErrorTranslator, ErrorCode, ErrorCategory } from '../errors/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 
-export class WalletError extends Error {
+/**
+ * Wallet-specific error that extends SteroidError for unified error handling.
+ */
+export class WalletError extends SteroidError {
+  public readonly type: WalletErrorType;
+
   constructor(
-    public type: WalletErrorType,
+    type: WalletErrorType,
     message: string,
-    public originalError?: any
+    originalError?: any
   ) {
-    super(message);
+    // Map WalletErrorType to ErrorCode
+    const code = WalletError.mapTypeToCode(type);
+    super({
+      code,
+      category: ErrorCategory.WALLET,
+      userMessage: message,
+      suggestion: WalletError.getSuggestionForType(type),
+      originalError,
+    });
+    this.type = type;
     this.name = 'WalletError';
+  }
+
+  private static mapTypeToCode(type: WalletErrorType): ErrorCode {
+    switch (type) {
+      case WalletErrorType.USER_REJECTED:
+        return ErrorCode.USER_REJECTED;
+      case WalletErrorType.NOT_CONNECTED:
+        return ErrorCode.NOT_CONNECTED;
+      case WalletErrorType.NETWORK_MISMATCH:
+        return ErrorCode.NETWORK_MISMATCH;
+      case WalletErrorType.UNSUPPORTED_OPERATION:
+        return ErrorCode.UNSUPPORTED_OPERATION;
+      default:
+        return ErrorCode.UNKNOWN;
+    }
+  }
+
+  private static getSuggestionForType(type: WalletErrorType): string {
+    switch (type) {
+      case WalletErrorType.USER_REJECTED:
+        return 'Click approve in your wallet to confirm the transaction';
+      case WalletErrorType.NOT_CONNECTED:
+        return 'Connect your wallet to continue';
+      case WalletErrorType.NETWORK_MISMATCH:
+        return 'Switch to the correct network in your wallet';
+      case WalletErrorType.UNSUPPORTED_OPERATION:
+        return 'This wallet does not support the requested operation';
+      default:
+        return 'Please try again or use a different wallet';
+    }
   }
 }
 

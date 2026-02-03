@@ -2,6 +2,7 @@ import { Connection } from '@solana/web3.js';
 import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
 import { sleep, Logger, calculateBackoff } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
+import { ErrorTranslator, SteroidError, ErrorCategory, ErrorCode } from '../errors/index.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -277,15 +278,16 @@ export class SteroidConnection {
     return startIndex;
   }
 
-  private enhanceError(error: any, methodName: string, attempts: number): Error {
-    const enhancedError = new Error(
-      `[SteroidConnection] ${methodName} failed after ${attempts} attempts. Last error: ${error.message}`
-    );
-    (enhancedError as any).originalError = error;
-    (enhancedError as any).methodName = methodName;
-    (enhancedError as any).attempts = attempts;
-    (enhancedError as any).currentUrl = this.urls[this.currentUrlIndex];
-    return enhancedError;
+  private enhanceError(error: any, methodName: string, attempts: number): SteroidError {
+    // Use ErrorTranslator to get a user-friendly error
+    const translatedError = ErrorTranslator.translate(error, {
+      methodName,
+      attempts,
+      currentUrl: this.urls[this.currentUrlIndex],
+      component: 'SteroidConnection',
+    });
+
+    return translatedError;
   }
 
   private log(level: 'info' | 'warn' | 'error', ...args: any[]): void {

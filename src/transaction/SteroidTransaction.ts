@@ -20,6 +20,7 @@ import {
 } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { ErrorTranslator, SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
 
 /**
  * Enhanced transaction handling with state management, automatic retries,
@@ -201,13 +202,22 @@ export class SteroidTransaction {
       const errorMsg = `Transaction not confirmed within ${timeoutSeconds}s after ${state.attempts} attempts`;
       this.updateState(stateId, TransactionState.EXPIRED, signature, errorMsg);
       this.emitter?.emit('transaction:expired', { stateId, signature: signature || undefined, attempts: state.attempts });
-      throw new Error(`[SteroidTransaction] ${errorMsg}. Last signature: ${signature || 'none'}`);
+      throw new SteroidError({
+        code: ErrorCode.TRANSACTION_TIMEOUT,
+        category: ErrorCategory.TRANSACTION,
+        userMessage: 'Transaction timed out',
+        suggestion: 'Network is congested. Try again with higher priority fee',
+        context: { signature: signature || undefined, attempts: state.attempts, timeoutSeconds },
+      });
 
     } catch (error: any) {
-      this.logger.error('Transaction failed:', error.message);
-      this.updateState(stateId, TransactionState.FAILED, state.signature, error.message);
-      this.emitter?.emit('transaction:failed', { stateId, error, attempts: state.attempts });
-      throw error;
+      const translatedError = SteroidError.isSteroidError(error) 
+        ? error 
+        : ErrorTranslator.translate(error, { stateId, attempts: state.attempts });
+      this.logger.error('Transaction failed:', translatedError.userMessage);
+      this.updateState(stateId, TransactionState.FAILED, state.signature, translatedError.userMessage);
+      this.emitter?.emit('transaction:failed', { stateId, error: translatedError, attempts: state.attempts });
+      throw translatedError;
     } finally {
       this.logger.setEnabled(false); // Reset logger state
     }
@@ -230,15 +240,16 @@ export class SteroidTransaction {
       if (simulation.value.err) {
         const errorDetails = parseSimulationError(simulation.value);
         this.logger.error(`Simulation failed: ${errorDetails}`);
-        throw new Error(`[SteroidTransaction] Simulation failed: ${errorDetails}`);
+        throw ErrorTranslator.simulationFailed(errorDetails);
       }
 
       if (simulation.value.logs) {
         this.logger.info(`Simulation succeeded. Logs count: ${simulation.value.logs.length}`);
       }
     } catch (error: any) {
-      if (error.message?.includes('Simulation failed')) throw error;
-      throw new Error(`[SteroidTransaction] Simulation error: ${error.message}`);
+      // Re-throw SteroidError as-is (already translated)
+      if (SteroidError.isSteroidError(error)) throw error;
+      throw ErrorTranslator.translate(error, { component: 'simulateTransaction' });
     }
   }
 

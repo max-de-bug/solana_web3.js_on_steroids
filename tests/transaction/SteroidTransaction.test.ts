@@ -142,7 +142,7 @@ describe('SteroidTransaction', () => {
           retryInterval: 100,
           skipPreflight: false,
         })
-      ).rejects.toThrow('Simulation failed');
+      ).rejects.toThrow('Transaction would fail');
     });
 
     it('should throw on timeout', async () => {
@@ -159,7 +159,7 @@ describe('SteroidTransaction', () => {
           retryInterval: 200,
           skipPreflight: true,
         })
-      ).rejects.toThrow(/not confirmed within/);
+      ).rejects.toThrow('Transaction timed out');
     }, 10000);
   });
 

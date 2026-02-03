@@ -4,5 +4,6 @@ export { SteroidTransaction } from './transaction/SteroidTransaction.js';
 export { SteroidWallet, WalletError } from './wallet/SteroidWallet.js';
 export { ComputeBudgetOptimizer } from './compute/ComputeBudgetOptimizer.js';
 export { SteroidEventEmitter } from './events/SteroidEventEmitter.js';
+export { SteroidError, ErrorCode, ErrorCategory, ErrorTranslator } from './errors/index.js';
+export type { SteroidErrorOptions } from './errors/index.js';
 export * from './types/SteroidWalletTypes.js';
-
