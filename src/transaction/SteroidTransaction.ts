@@ -16,7 +16,10 @@ import {
   isBlockhashExpiredError, 
   serializeTransaction, 
   generateId, 
-  clearExpiredEntries 
+  clearExpiredEntries,
+  getTransactionBlockhash,
+  setTransactionBlockhash,
+  isTransactionSigned
 } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
@@ -106,13 +109,13 @@ export class SteroidTransaction {
         this.emitter?.emit('transaction:simulated', { stateId, computeUnits: computeUnitsEstimated });
       }
 
-      // 2. Initial blockhash setup if needed
-      let blockhashContext: BlockhashWithExpiryBlockHeight | undefined;
-      if (isLegacyTransaction(transaction)) {
-        blockhashContext = await this.getFreshBlockhash();
-        transaction.recentBlockhash = blockhashContext.blockhash;
-        transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
-      }
+      // 2. Initial blockhash setup
+      let blockhashContext: BlockhashWithExpiryBlockHeight = await this.getFreshBlockhash();
+      transaction = setTransactionBlockhash(
+        transaction,
+        blockhashContext.blockhash,
+        blockhashContext.lastValidBlockHeight
+      ) as typeof transaction;
 
       const startTime = Date.now();
       let signature: TransactionSignature = '';
@@ -128,15 +131,27 @@ export class SteroidTransaction {
 
           // Check if blockhash is too old and refresh if needed
           const ageSeconds = (Date.now() - lastBlockhashRefresh) / 1000;
-          if (ageSeconds > maxBlockhashAge && isLegacyTransaction(transaction)) {
+          if (ageSeconds > maxBlockhashAge) {
             this.logger.info(`Blockhash age ${ageSeconds.toFixed(1)}s exceeds max ${maxBlockhashAge}s, refreshing...`);
             blockhashContext = await this.getFreshBlockhash();
-            transaction.recentBlockhash = blockhashContext.blockhash;
-            transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
             
-            // Re-serialize with new blockhash
-            // Note: This assumes the transaction is re-signed by the caller if needed
+            // Update blockhash for both Legacy and Versioned transactions
+            transaction = setTransactionBlockhash(
+              transaction,
+              blockhashContext.blockhash,
+              blockhashContext.lastValidBlockHeight
+            ) as typeof transaction;
+            
             lastBlockhashRefresh = Date.now();
+            
+            // Re-sign transaction if callback provided
+            if (mergedOptions.onBlockhashRefresh) {
+              this.logger.info('Requesting re-signature after blockhash refresh...');
+              transaction = await mergedOptions.onBlockhashRefresh(transaction) as typeof transaction;
+              this.logger.info('Transaction re-signed successfully');
+            } else if (isTransactionSigned(transaction)) {
+               this.logger.warn('Blockhash refreshed but no onBlockhashRefresh callback provided. Transaction signature might be invalid.');
+            }
           }
 
           // Broadcast transaction

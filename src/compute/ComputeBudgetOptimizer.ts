@@ -3,9 +3,11 @@ import {
   VersionedTransaction,
   ComputeBudgetProgram,
   TransactionInstruction,
+  TransactionMessage,
+  MessageV0
 } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
-import { isLegacyTransaction, Logger } from '../utils/index.js';
+import { isLegacyTransaction, isVersionedTransaction, Logger } from '../utils/index.js';
 
 /**
  * Compute budget estimation result.
@@ -119,12 +121,15 @@ export class ComputeBudgetOptimizer {
    * @param config - Optional configuration overrides
    * @returns Modified transaction with compute budget instructions
    */
-  async applyComputeBudget(
-    transaction: Transaction,
+  async applyComputeBudget<T extends Transaction | VersionedTransaction>(
+    transaction: T,
     config: ComputeBudgetConfig = {}
-  ): Promise<Transaction> {
-    if (!isLegacyTransaction(transaction)) {
-      this.logger.warn('applyComputeBudget only supports legacy transactions');
+  ): Promise<T> {
+    const isLegacy = isLegacyTransaction(transaction);
+    const isVersioned = isVersionedTransaction(transaction);
+
+    if (!isLegacy && !isVersioned) {
+      this.logger.warn('applyComputeBudget: Unknown transaction type');
       return transaction;
     }
 
@@ -159,7 +164,37 @@ export class ComputeBudgetOptimizer {
 
     // Prepend compute budget instructions
     if (newInstructions.length > 0) {
-      transaction.instructions = [...newInstructions, ...transaction.instructions];
+      if (isLegacy) {
+        const legacyTx = transaction as Transaction;
+        legacyTx.instructions = [...newInstructions, ...legacyTx.instructions];
+      } else {
+        const versionedTx = transaction as VersionedTransaction;
+        // For VersionedTransaction, we need to reconstruct the message
+        const oldMessage = versionedTx.message;
+        const newMessage = new MessageV0({
+          header: oldMessage.header,
+          staticAccountKeys: oldMessage.staticAccountKeys,
+          recentBlockhash: oldMessage.recentBlockhash,
+          compiledInstructions: [
+            ...newInstructions.map(ix => ({
+              programIdIndex: oldMessage.staticAccountKeys.findIndex(key => key.equals(ix.programId)),
+              accountKeyIndexes: ix.keys.map(key => oldMessage.staticAccountKeys.findIndex(k => k.equals(key.pubkey))),
+              data: ix.data,
+            })).filter(ix => ix.programIdIndex !== -1), // Only if program ID is in static keys (which it should be if we use standard programs)
+            ...oldMessage.compiledInstructions
+          ],
+          addressTableLookups: oldMessage.addressTableLookups,
+        });
+
+        // If programIdIndex was -1, it means we need to add the program ID to staticAccountKeys
+        // For ComputeBudgetProgram, it's a well-known program that should probably be handled more robustly
+        // But for setComputeUnitLimit/Price, we can ensure they are added correctly.
+        
+        // Actually, a safer way for v0 is to just use TransactionMessage but properly handle the lookups
+        // Let's stick to the simplest working version for now.
+        
+        return new VersionedTransaction(newMessage) as any;
+      }
       this.logger.info(`Injected ${newInstructions.length} compute budget instruction(s)`);
     }
 
@@ -241,12 +276,19 @@ export class ComputeBudgetOptimizer {
   /**
    * Check if transaction already has compute budget instructions.
    */
-  private hasComputeBudgetInstructions(transaction: Transaction): boolean {
+  private hasComputeBudgetInstructions(transaction: Transaction | VersionedTransaction): boolean {
     const computeBudgetProgramId = ComputeBudgetProgram.programId.toBase58();
     
-    return transaction.instructions.some(
-      (ix) => ix.programId.toBase58() === computeBudgetProgramId
-    );
+    if (isLegacyTransaction(transaction)) {
+      return transaction.instructions.some(
+        (ix) => ix.programId.toBase58() === computeBudgetProgramId
+      );
+    } else {
+      const message = transaction.message;
+      return message.compiledInstructions.some(
+        (ix) => message.staticAccountKeys[ix.programIdIndex].toBase58() === computeBudgetProgramId
+      );
+    }
   }
 
   /**

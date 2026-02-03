@@ -78,6 +78,11 @@ export interface SteroidSendOptions extends SendOptions {
    * - ComputeBudgetConfig: Custom configuration
    */
   computeBudget?: boolean | ComputeBudgetConfig;
+  /**
+   * Optional callback to re-sign transaction after blockhash refresh.
+   * If provided, SteroidTransaction will call this when blockhash is updated.
+   */
+  onBlockhashRefresh?: (transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
 }
 
 export enum TransactionState {

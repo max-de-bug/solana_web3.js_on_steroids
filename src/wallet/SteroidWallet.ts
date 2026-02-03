@@ -12,7 +12,7 @@ import {
   SteroidWalletConfig,
   SteroidSendOptions 
 } from '../types/SteroidWalletTypes.js';
-import { isLegacyTransaction, Logger, normalizeWalletError } from '../utils/index.js';
+import { isLegacyTransaction, Logger, normalizeWalletError, getTransactionBlockhash, setTransactionBlockhash } from '../utils/index.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
 import { SteroidError, ErrorTranslator, ErrorCode, ErrorCategory } from '../errors/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
@@ -131,14 +131,14 @@ export class SteroidWallet {
 
     try {
       // Refresh blockhash if needed
-      if (this.config.autoRefreshBlockhash && isLegacyTransaction(transaction)) {
-        await this.ensureFreshBlockhash(transaction);
+      if (this.config.autoRefreshBlockhash) {
+        transaction = await this.ensureFreshBlockhash(transaction) as typeof transaction;
       }
 
       // Apply compute budget optimization if enabled
-      if (options.computeBudget !== false && isLegacyTransaction(transaction)) {
+      if (options.computeBudget !== false) {
         const budgetConfig = typeof options.computeBudget === 'object' ? options.computeBudget : {};
-        transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
+        transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig) as typeof transaction;
       }
 
       // Sign transaction
@@ -150,6 +150,11 @@ export class SteroidWallet {
       return await this.txEngine.sendAndConfirm(signedTx, {
         enableLogging: this.config.enableLogging,
         ...options,
+        // Automatic re-signing callback
+        onBlockhashRefresh: async (tx) => {
+          this.log('info', 'Re-signing transaction after blockhash refresh...');
+          return await this.signTransactionSafe(tx);
+        }
       });
     } catch (error: any) {
       throw this.normalizeError(error);
@@ -274,20 +279,22 @@ export class SteroidWallet {
   /**
    * Ensures transaction has a fresh blockhash.
    */
-  private async ensureFreshBlockhash(transaction: Transaction): Promise<void> {
-    if (!transaction.recentBlockhash) {
+  private async ensureFreshBlockhash<T extends Transaction | VersionedTransaction>(transaction: T): Promise<T> {
+    const existingBlockhash = getTransactionBlockhash(transaction);
+
+    if (!existingBlockhash) {
       // No blockhash set, fetch a fresh one
       const { blockhash, lastValidBlockHeight } = await (this.connection as any).getLatestBlockhash('confirmed');
-      transaction.recentBlockhash = blockhash;
-      transaction.lastValidBlockHeight = lastValidBlockHeight;
+      const updatedTx = setTransactionBlockhash(transaction, blockhash, lastValidBlockHeight);
       this.logger.info('Set fresh blockhash on transaction');
-      return;
+      return updatedTx as T;
     }
 
     // Check if existing blockhash might be stale
     // Note: This is a best-effort check - we can't know the exact age
     // The transaction layer will refresh if needed during retry
     this.logger.info('Transaction already has blockhash, will validate during send');
+    return transaction;
   }
 
   /**
