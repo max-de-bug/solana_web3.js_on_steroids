@@ -156,4 +156,75 @@ describe('SteroidConnection', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe('Latency Scoring', () => {
+    it('should initialize scorer when latencyScoring is enabled', () => {
+      const connection = new SteroidConnection('https://primary.solana.com', {
+        latencyScoring: true,
+        healthCheckInterval: 0,
+      });
+      
+      expect(connection).toBeDefined();
+      expect((connection as any).scorer).toBeDefined();
+    });
+
+    it('should record latency on successful calls', async () => {
+      const connection = new SteroidConnection('https://primary.solana.com', {
+        latencyScoring: true,
+        healthCheckInterval: 0,
+      }) as any;
+      
+      const scorerSpy = vi.spyOn(connection.scorer, 'recordSuccess');
+      
+      await connection.getSlot();
+      
+      expect(scorerSpy).toHaveBeenCalled();
+      const health = connection.getHealthStatus()[0];
+      expect(health.latency).toBeDefined();
+      expect(health.score).toBeGreaterThan(0);
+    });
+
+    it('should record failure on failed calls', async () => {
+      const connection = new SteroidConnection('https://primary.solana.com', {
+        latencyScoring: true,
+        healthCheckInterval: 0,
+        maxRetries: 1,
+      }) as any;
+      
+      const scorerSpy = vi.spyOn(connection.scorer, 'recordFailure');
+      
+      // Force a failure by mocking the method to throw
+      vi.spyOn(connection.activeConnection, 'getSlot').mockRejectedValueOnce(new Error('Mock failure'));
+      
+      try {
+        await connection.getSlot();
+      } catch (e) {
+        // Expected
+      }
+      
+      expect(scorerSpy).toHaveBeenCalled();
+    });
+
+    it('should pick the best available node during failover if scoring is enabled', async () => {
+      const connection = new SteroidConnection('https://primary.solana.com', {
+        fallbacks: ['https://fast.solana.com', 'https://slow.solana.com'],
+        latencyScoring: true,
+        healthCheckInterval: 0,
+        maxRetries: 3,
+      }) as any;
+      
+      // record some scores. 
+      // index 1: fast. index 2: slow.
+      connection.scorer.recordSuccess('https://fast.solana.com', 50);
+      connection.scorer.recordSuccess('https://slow.solana.com', 500);
+      
+      // Force first node to fail with a node failure error
+      vi.spyOn(connection.activeConnection, 'getSlot').mockRejectedValueOnce(new Error('fetch failed'));
+      
+      await connection.getSlot();
+      
+      // Should have switched to index 1 (fast)
+      expect(connection.getActiveEndpoint()).toBe('https://fast.solana.com');
+    });
+  });
 });

@@ -2,7 +2,8 @@ import { Connection } from '@solana/web3.js';
 import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
 import { sleep, Logger, calculateBackoff } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
-import { ErrorTranslator, SteroidError, ErrorCategory, ErrorCode } from '../errors/index.js';
+import { ErrorTranslator, SteroidError } from '../errors/index.js';
+import { RpcScorer } from './RpcScorer.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -12,14 +13,13 @@ import { ErrorTranslator, SteroidError, ErrorCategory, ErrorCode } from '../erro
 export class SteroidConnection {
   private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
   private static readonly MAX_BACKOFF_DELAY_MS = 30000;
-  private static readonly JITTER_MS = 100;
 
   private activeConnection: Connection;
   private urls: string[];
   private currentUrlIndex: number = 0;
   private config: SteroidConnectionConfig;
   private steroidConfig: Required<
-    Pick<SteroidConnectionConfig, 'maxRetries' | 'retryDelay' | 'healthCheckInterval' | 'requestTimeout' | 'enableLogging'>
+    Pick<SteroidConnectionConfig, 'maxRetries' | 'retryDelay' | 'healthCheckInterval' | 'requestTimeout' | 'enableLogging' | 'latencyScoring' | 'scoringWindow'>
   >;
   private healthStatus: Map<string, RPCHealth> = new Map();
   private healthCheckTimer?: NodeJS.Timeout;
@@ -27,6 +27,7 @@ export class SteroidConnection {
   private lastFailoverTime: number = 0;
   private logger: Logger;
   private emitter?: SteroidEventEmitter;
+  private scorer?: RpcScorer;
 
   constructor(endpoint: string, config: SteroidConnectionConfig = {}, emitter?: SteroidEventEmitter) {
     this.urls = [endpoint, ...(config.fallbacks || [])];
@@ -38,8 +39,14 @@ export class SteroidConnection {
       healthCheckInterval: config.healthCheckInterval ?? 30000,
       requestTimeout: config.requestTimeout ?? 30000,
       enableLogging: config.enableLogging ?? false,
+      latencyScoring: config.latencyScoring ?? false,
+      scoringWindow: config.scoringWindow ?? 20,
     };
     this.logger = new Logger('SteroidConnection', this.steroidConfig.enableLogging);
+
+    if (this.steroidConfig.latencyScoring) {
+      this.scorer = new RpcScorer(this.steroidConfig.scoringWindow);
+    }
 
     // Initialize health status
     this.urls.forEach((url) => {
@@ -95,6 +102,9 @@ export class SteroidConnection {
     let lastError: any;
 
     for (let attempt = 0; attempt < this.steroidConfig.maxRetries; attempt++) {
+      const startTime = Date.now();
+      const currentUrl = this.urls[this.currentUrlIndex];
+      
       try {
         const result = await this.callWithTimeout(
           method, 
@@ -102,9 +112,14 @@ export class SteroidConnection {
           this.activeConnection, 
           this.steroidConfig.requestTimeout
         );
-        this.updateHealthStatus(this.getActiveEndpoint(), true);
+        
+        const latency = Date.now() - startTime;
+        this.scorer?.recordSuccess(currentUrl, latency);
+        this.updateHealthStatus(currentUrl, true, latency);
+        
         return result;
       } catch (error: any) {
+        this.scorer?.recordFailure(currentUrl);
         // Map AbortError from our controller to a "Request timeout" message for consistency
         lastError = error.name === 'AbortError' ? new Error('Request timeout') : error;
         attemptedUrls.add(this.currentUrlIndex);
@@ -156,7 +171,12 @@ export class SteroidConnection {
     if (health) {
       health.healthy = healthy;
       health.lastChecked = Date.now();
-      if (latency !== undefined) health.latency = latency;
+      if (latency !== undefined) {
+        health.latency = latency;
+      }
+      if (this.scorer) {
+        health.score = this.scorer.getScore(url);
+      }
     }
   }
 
@@ -262,9 +282,15 @@ export class SteroidConnection {
    * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
    */
   private findNextAvailableRpcIndex(attemptedUrls: Set<number>): number {
+    // 1. If latency scoring is enabled, pick the best node
+    if (this.scorer) {
+      const bestIndex = this.scorer.getBestUrlIndex(this.urls, this.healthStatus, attemptedUrls);
+      if (bestIndex !== -1) return bestIndex;
+    }
+
     const startIndex = (this.currentUrlIndex + 1) % this.urls.length;
     
-    // 1. Try to find the next healthy RPC starting from the next in line
+    // 2. Try to find the next healthy RPC starting from the next in line
     for (let i = 0; i < this.urls.length; i++) {
       const index = (startIndex + i) % this.urls.length;
       // Only consider URLs not yet attempted in the current resilience loop
@@ -273,8 +299,7 @@ export class SteroidConnection {
       }
     }
     
-    // 2. Fallback: if all healthy nodes have been attempted or none are healthy,
-    // just try the very next one in the list (round-robin)
+    // 3. Fallback: round-robin
     return startIndex;
   }
 
@@ -319,11 +344,13 @@ export class SteroidConnection {
       );
       
       const latency = Date.now() - startTime;
+      this.scorer?.recordSuccess(url, latency);
       this.updateHealthStatus(url, true, latency);
       this.emitter?.emit('connection:health', { endpoint: url, healthy: true, latency });
       this.log('info', `Health check passed for ${url} (${latency}ms)`);
     } catch (error: any) {
       this.updateHealthStatus(url, false);
+      this.scorer?.recordFailure(url);
       this.emitter?.emit('connection:health', { endpoint: url, healthy: false });
       this.log('warn', `Health check failed for ${url}:`, error.message);
     }

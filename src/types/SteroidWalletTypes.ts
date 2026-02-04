@@ -32,7 +32,10 @@ export interface SteroidConnectionConfig extends ConnectionConfig {
       healthCheckInterval?: number;
       requestTimeout?: number;
       enableLogging?: boolean;
-
+      /** Enable performance-based RPC selection (default: false) */
+      latencyScoring?: boolean;
+      /** Number of requests to consider for scoring (default: 20) */
+      scoringWindow?: number;
 }
 
 export interface RPCHealth {
@@ -40,6 +43,7 @@ export interface RPCHealth {
   healthy: boolean;
   lastChecked: number;
   latency?: number;
+  score?: number;
 }
 
 export interface FailoverStats {
@@ -214,6 +218,8 @@ export const DEFAULT_CONFIG = {
     healthCheckInterval: 30000,
     requestTimeout: 30000,
     enableLogging: false,
+    latencyScoring: false,
+    scoringWindow: 20,
   },
   TRANSACTION: {
     timeoutSeconds: 60,
