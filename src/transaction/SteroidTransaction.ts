@@ -17,7 +17,6 @@ import {
   serializeTransaction, 
   generateId, 
   clearExpiredEntries,
-  getTransactionBlockhash,
   setTransactionBlockhash,
   isTransactionSigned
 } from '../utils/index.js';
@@ -68,6 +67,7 @@ export class SteroidTransaction {
       maxBlockhashAge,
       enableLogging,
       confirmationNodes,
+      abortSignal,
     } = mergedOptions;
 
     const executionTimeout = timeoutSeconds * 1000;
@@ -85,6 +85,9 @@ export class SteroidTransaction {
     this.emitter?.emit('transaction:pending', { stateId });
 
     try {
+      // Check for abort before starting
+      this.checkAbortSignal(abortSignal, stateId, state);
+
       // 0. Apply compute budget optimization if enabled
       let computeUnitsEstimated: number | undefined;
       const isSigned = isLegacyTransaction(transaction) 
@@ -128,6 +131,9 @@ export class SteroidTransaction {
           attempts++;
           state.attempts = attempts; // Update state attempts
           state.lastAttemptTime = Date.now();
+
+          // Check for abort at start of each iteration
+          this.checkAbortSignal(abortSignal, stateId, state);
 
           // Check if blockhash is too old and refresh if needed
           const ageSeconds = (Date.now() - lastBlockhashRefresh) / 1000;
@@ -211,6 +217,9 @@ export class SteroidTransaction {
         }
 
         await sleep(retryInterval);
+
+        // Check for abort after sleep
+        this.checkAbortSignal(abortSignal, stateId, state);
       }
 
       // Timeout reached
@@ -343,6 +352,34 @@ export class SteroidTransaction {
       existing.state = state;
       if (signature) existing.signature = signature;
       if (error) existing.error = error;
+    }
+  }
+
+  /**
+   * Checks if the abort signal has been triggered and throws if so.
+   * @throws SteroidError with code ABORTED if signal is aborted
+   */
+  private checkAbortSignal(
+    signal: AbortSignal | undefined,
+    stateId: string,
+    state: TransactionStateInfo
+  ): void {
+    if (signal?.aborted) {
+      const abortReason = signal.reason instanceof Error 
+        ? signal.reason.message 
+        : String(signal.reason || 'Operation aborted by user');
+      
+      this.updateState(stateId, TransactionState.ABORTED, state.signature, abortReason);
+      this.emitter?.emit('transaction:aborted', { stateId, signature: state.signature });
+      this.logger.info(`Transaction aborted: ${abortReason}`);
+      
+      throw new SteroidError({
+        code: ErrorCode.ABORTED,
+        category: ErrorCategory.TRANSACTION,
+        userMessage: 'Transaction cancelled',
+        suggestion: 'The transaction was cancelled by the user or application',
+        context: { stateId, signature: state.signature, reason: abortReason },
+      });
     }
   }
 

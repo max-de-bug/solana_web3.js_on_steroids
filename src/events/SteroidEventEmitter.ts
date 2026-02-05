@@ -21,6 +21,7 @@ export type SteroidEventMap = {
   };
   'transaction:failed': { stateId: string; error: Error; attempts: number };
   'transaction:expired': { stateId: string; signature?: string; attempts: number };
+  'transaction:aborted': { stateId: string; signature?: string };
   
   // Connection events
   'connection:failover': { from: string; to: string; reason: string };

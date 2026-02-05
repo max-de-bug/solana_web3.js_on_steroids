@@ -75,6 +75,11 @@ export interface SteroidSendOptions extends SendOptions {
   maxBlockhashAge?: number;
   enableLogging?: boolean;
   confirmationNodes?: number;
+  /**
+   * Optional AbortSignal to cancel the transaction.
+   * When aborted, throws SteroidError with code ABORTED.
+   */
+  abortSignal?: AbortSignal;
   /** 
    * Compute budget optimization config.
    * - true: Enable with defaults
@@ -97,7 +102,8 @@ export enum TransactionState {
   CONFIRMED = 'CONFIRMED',
   FINALIZED = 'FINALIZED',
   FAILED = 'FAILED',
-  EXPIRED = 'EXPIRED'
+  EXPIRED = 'EXPIRED',
+  ABORTED = 'ABORTED'
 }
 
 export interface TransactionStateInfo {
