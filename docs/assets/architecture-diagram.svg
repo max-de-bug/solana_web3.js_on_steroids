@@ -131,7 +131,19 @@
         SteroidTransaction
       </text>
       <text x="580" y="500" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
-        Submission Engine
+        WS + Multi-node Polling
+      </text>
+    </g>
+    
+    <!-- ClusterDetector -->
+    <g id="detector-node" filter="url(#shadow)">
+      <rect x="100" y="320" width="280" height="70" rx="12" fill="#FFFFFF" stroke="#34D399" stroke-width="3"/>
+      <circle cx="125" cy="355" r="6" fill="#34D399" filter="url(#glow)"/>
+      <text x="240" y="350" font-family="'SF Pro Display', system-ui, sans-serif" font-size="17" font-weight="700" fill="#1E293B" text-anchor="middle">
+        ClusterDetector
+      </text>
+      <text x="240" y="370" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
+        Genesis Hash Validation
       </text>
     </g>
     
@@ -143,11 +155,10 @@
         SteroidWallet
       </text>
       <text x="920" y="500" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" text-anchor="middle">
-        Wallet Wrapper
+        Automatic Net-Validation
       </text>
     </g>
     
-    <!-- Internal connections within Steroids layer -->
     <!-- Client to Connection -->
     <path d="M 650 390 L 300 450" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
     
@@ -156,6 +167,12 @@
     
     <!-- Client to Wallet -->
     <path d="M 750 390 L 880 450" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+    
+    <!-- Connection to ClusterDetector -->
+    <path d="M 240 450 L 240 390" stroke="#333333" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
+
+    <!-- Wallet to ClusterDetector (dashed confirmation) -->
+    <path d="M 780 460 L 380 370" stroke="#666666" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
     
     <!-- Transaction to Connection (dashed) -->
     <path d="M 520 450 L 340 480" stroke="#666666" stroke-width="2" fill="none" stroke-dasharray="8,4" marker-end="url(#arrowDashed)"/>
@@ -253,10 +270,22 @@
     Re-broadcasting
   </text>
   
-  <!-- Transaction to Confirmation Nodes (Multi-node Polling) -->
+  <!-- Transaction to Primary (WebSocket Confirmation) -->
+  <path d="M 560 520 L 360 750" stroke="#9945FF" stroke-width="3" fill="none" stroke-dasharray="5,3" marker-end="url(#arrowPurple)"/>
+  <text x="465" y="615" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#9945FF" font-weight="700">
+    WebSocket (v1.0.13)
+  </text>
+  <text x="465" y="630" font-family="'SF Pro Text', system-ui, sans-serif" font-size="10" fill="#64748B">
+    Push Updates
+  </text>
+
+  <!-- Transaction to Confirmation Nodes (Multi-node Polling Fallback) -->
   <path d="M 650 520 L 1050 750" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrowSolid)"/>
   <text x="820" y="640" font-family="'SF Pro Text', system-ui, sans-serif" font-size="11" fill="#64748B" font-weight="600">
-    Multi-node Polling
+    Resilient Fallback
+  </text>
+  <text x="820" y="655" font-family="'SF Pro Text', system-ui, sans-serif" font-size="10" fill="#64748B">
+    HTTP Polling
   </text>
   
   <!-- Legend -->

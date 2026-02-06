@@ -24,17 +24,20 @@ This library wraps `@solana/web3.js` in a robust, automated engine that handles 
 ### 1. Transparent RPC Failover (Proxy Pattern)
 Uses a JS `Proxy` to wrap the `Connection` object. If a node failure (5xx, network error) is detected, it automatically swaps to a healthy fallback node mid-request. **Your app code stays "dumb" while the infra stays smart.**
 
-### 2. Multi-Node Confirmation Polling
-Doesn't trust a single node's word. It polls multiple RPC providers simultaneously for signature status to bypass node lag and ensure the fastest possible confirmation UI.
+### 2. Low-Latency WebSocket Confirmation (v1.0.13)
+Now prioritizes `onSignature` WebSocket subscriptions for real-time confirmation. It offers ultra-low latency compared to polling, while maintaining a robust multi-node HTTP fallback if the WebSocket connection is unstable.
 
-### 3. Continuous Re-broadcasting Loop
+### 3. Automatic Cluster Detection & Safety
+Automatically identifies the Solana network (Mainnet, Devnet, Testnet) via genesis hash. Prevents catastrophic "cross-network" mistakes by validating that your wallet and RPC connection are targeting the same cluster.
+
+### 4. Multi-Node Confirmation Polling (Fallback)
+Doesn't trust a single node's word. If WebSockets fail or time out, it polls multiple RPC providers simultaneously for signature status to bypass node lag.
+
+### 5. Continuous Re-broadcasting Loop
 Transactions are "babysat" by an engine that refreshes blockhashes and re-broadcasts automatically until a definitive landing or expiration occurs.
 
-### 4. Reactive Event Emitter (Reactive UI)
-Exposes an internal event system (Push-based) so your UI can react instantly to re-broadcasts, RPC failovers, and confirmation progress without polling state.
-
-### 5. Dynamic Priority Fee Optimization
-Automatically measures compute unit consumption via simulation and fetches network-wide priority fee percentiles to inject optimal `ComputeBudget` instructions during congestion.
+### 6. Dynamic Priority Fee Optimization
+Automatically measures compute unit consumption via simulation and fetches network-wide priority fee percentiles to inject optimal `ComputeBudget` instructions.
 
 ---
 
@@ -74,20 +77,23 @@ const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
 const balance = await client.connection.getBalance(myPublicKey);
 
 // Connect a wallet adapter for steroidal transactions
-const steroidWallet = client.connectWallet(walletAdapter);
+const steroidWallet = client.connectWallet(walletAdapter, {
+  expectedGenesisHash: '5eykt4UsF...', // Optional safety check
+});
 
 // Listen to real-time events for reactive UX
 client.on('transaction:sent', ({ signature, attempt }) => {
   console.log(`Transaction ${signature} sent (Attempt ${attempt})`);
 });
 
-client.on('connection:failover', ({ from, to }) => {
-  console.warn(`RPC Failover: Switching from ${from} to ${to}`);
+client.on('connection:cluster-detected', ({ cluster }) => {
+  console.log(`Connected to: ${cluster}`);
 });
 
-// Send with automatic priority fee optimization
+// Send with automatic priority fee optimization & WebSocket confirmation
 const signature = await steroidWallet.signAndSend(transaction, {
-  computeBudget: { feePercentile: 75 } // Target 75th percentile for fast landing
+  computeBudget: { feePercentile: 75 }, // Target 75th percentile
+  useWebSocket: true // Default: true, with automatic polling fallback
 });
 
 ```
@@ -97,12 +103,14 @@ const signature = await steroidWallet.signAndSend(transaction, {
 ### `SteroidConnection`
 A resilient proxy for `web3.js.Connection`.
 - **Health Heartbeat**: Background pings monitor latency and uptime across all fallbacks.
-- **Error classification**: Distinguishes between **Transient** errors (retry same node) and **Node Failures** (failover to next node).
+- **Cluster Awareness**: Automatic genesis hash validation and cluster mismatch protection.
+- **Error classification**: Distinguishes between **Transient** errors and **Node Failures**.
 
 ### `SteroidTransaction`
 The heavy-duty engine for submission and confirmation.
-- **Signature Polling**: Parallel checks across `confirmationNodes`.
-- **Blockhash Refresh**: Automatically re-fetches `recentBlockhash` if the transaction has been pending too long, preventing expiration before signing.
+- **WebSocket Engine**: Real-time push notifications for transaction confirmation.
+- **Signature Polling**: Multi-node parallel checks as a resilient fallback.
+- **Blockhash Refresh**: Automatically re-fetches `recentBlockhash` if needed.
 
 ---
 
