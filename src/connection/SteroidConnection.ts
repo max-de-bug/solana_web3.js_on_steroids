@@ -1,9 +1,10 @@
 import { Connection } from '@solana/web3.js';
-import { SteroidConnectionConfig, RPCHealth } from '../types/SteroidWalletTypes.js';
+import { SteroidConnectionConfig, RPCHealth, ClusterType } from '../types/SteroidWalletTypes.js';
 import { sleep, Logger, calculateBackoff } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ErrorTranslator, SteroidError } from '../errors/index.js';
 import { RpcScorer } from './RpcScorer.js';
+import { ClusterDetector } from './ClusterDetector.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -28,6 +29,8 @@ export class SteroidConnection {
   private logger: Logger;
   private emitter?: SteroidEventEmitter;
   private scorer?: RpcScorer;
+  private detectedCluster: ClusterType = 'unknown';
+  private genesisHash: string = '';
 
   constructor(endpoint: string, config: SteroidConnectionConfig = {}, emitter?: SteroidEventEmitter) {
     this.urls = [endpoint, ...(config.fallbacks || [])];
@@ -58,6 +61,11 @@ export class SteroidConnection {
     });
 
     this.activeConnection = new Connection(endpoint, config);
+
+    // Initial cluster detection
+    this.detectCluster().catch((err) => {
+      this.logger.warn('Initial cluster detection failed:', err.message);
+    });
 
     // Start health checks if enabled
     if (this.steroidConfig.healthCheckInterval > 0) {
@@ -411,5 +419,40 @@ export class SteroidConnection {
   public async checkHealth(): Promise<RPCHealth[]> {
     await this.performHealthCheck();
     return this.getHealthStatus();
+  }
+
+  /**
+   * Detects the cluster type and genesis hash.
+   */
+  private async detectCluster(): Promise<void> {
+    const { cluster, genesisHash } = await ClusterDetector.detectFromConnection(this.activeConnection);
+    this.detectedCluster = cluster;
+    this.genesisHash = genesisHash;
+
+    this.logger.info(`Detected cluster: ${ClusterDetector.getClusterName(cluster)} (${genesisHash.slice(0, 8)}...)`);
+    this.emitter?.emit('connection:cluster-detected', { cluster, genesisHash });
+
+    // Validate against expected cluster if configured
+    if (this.config.expectedCluster && cluster !== 'unknown' && cluster !== this.config.expectedCluster) {
+      this.logger.error(`Cluster mismatch! Detected ${cluster}, expected ${this.config.expectedCluster}`);
+      this.emitter?.emit('connection:cluster-mismatch', { 
+        detected: cluster, 
+        expected: this.config.expectedCluster 
+      });
+    }
+  }
+
+  /**
+   * Gets the detected cluster type.
+   */
+  public getCluster(): ClusterType {
+    return this.detectedCluster;
+  }
+
+  /**
+   * Gets the network genesis hash.
+   */
+  public getGenesisHash(): string {
+    return this.genesisHash;
   }
 }

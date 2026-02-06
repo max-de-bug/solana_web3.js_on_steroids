@@ -144,6 +144,7 @@ export class SteroidClient {
       allEndpoints: this.connection.getEndpoints(),
       failoverStats: this.connection.getFailoverStats(),
       healthStatus: this.connection.getHealthStatus(),
+      detectedCluster: this.connection.getCluster(),
     };
   }
 

@@ -14,6 +14,7 @@ import {
 } from '../types/SteroidWalletTypes.js';
 import { isLegacyTransaction, Logger, normalizeWalletError, getTransactionBlockhash, setTransactionBlockhash } from '../utils/index.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { ClusterDetector } from '../connection/ClusterDetector.js';
 import { SteroidError, ErrorTranslator, ErrorCode, ErrorCategory } from '../errors/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 
@@ -248,18 +249,24 @@ export class SteroidWallet {
    */
   private async validateNetwork(): Promise<void> {
     try {
-      // Get genesis hash to uniquely identify the network
+      // Get genesis hash and detected cluster to uniquely identify the network
       const genesisHash = await (this.connection as any).getGenesisHash();
       this.genesisHash = genesisHash;
+      
+      const cluster = ClusterDetector.detectCluster(genesisHash);
+      const clusterName = ClusterDetector.getClusterName(cluster);
 
-      this.logger.info(`Network validation - Genesis hash: ${genesisHash.slice(0, 16)}...`);
+      this.logger.info(`Network validation - Cluster: ${clusterName}, Genesis hash: ${genesisHash.slice(0, 16)}...`);
 
       // If expected genesis hash is configured, verify it matches
       if (this.config.expectedGenesisHash) {
         if (genesisHash !== this.config.expectedGenesisHash) {
+          const expectedCluster = ClusterDetector.detectCluster(this.config.expectedGenesisHash);
+          const expectedName = ClusterDetector.getClusterName(expectedCluster);
+          
           throw new WalletError(
             WalletErrorType.NETWORK_MISMATCH,
-            `Network mismatch: Expected ${this.config.expectedGenesisHash.slice(0, 16)}..., got ${genesisHash.slice(0, 16)}...`
+            `Network mismatch: Expected ${expectedName} (${this.config.expectedGenesisHash.slice(0, 8)}...), got ${clusterName} (${genesisHash.slice(0, 8)}...)`
           );
         }
         this.logger.info('Network validation passed - Genesis hash matches expected value');

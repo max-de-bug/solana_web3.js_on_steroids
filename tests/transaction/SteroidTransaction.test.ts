@@ -222,4 +222,58 @@ describe('SteroidTransaction', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe('WebSocket Confirmation', () => {
+    it('should use WebSocket confirmation by default', async () => {
+      const tx = createTestTransaction();
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      
+      await transactionEngine.sendAndConfirm(tx, {
+        timeoutSeconds: 5,
+        retryInterval: 100,
+        skipPreflight: true,
+        enableLogging: true,
+      });
+
+      const wsLogs = consoleSpy.mock.calls.filter(call => 
+        (typeof call[0] === 'string' && (
+          call[0].includes('Attempting WebSocket confirmation') || 
+          call[0].includes('Transaction confirmed via WebSocket')
+        )) || (typeof call[1] === 'string' && (
+          call[1].includes('Attempting WebSocket confirmation') || 
+          call[1].includes('Transaction confirmed via WebSocket')
+        ))
+      );
+      expect(wsLogs.length).toBeGreaterThan(0);
+      consoleSpy.mockRestore();
+    });
+
+    it('should fall back to polling if WebSocket fails', async () => {
+      // Mock WebSocket confirmation to fail
+      const { WebSocketConfirmation } = await import('../../src/connection/WebSocketConfirmation.js');
+      vi.spyOn(WebSocketConfirmation, 'confirmSignature').mockResolvedValue(false);
+      
+      const tx = createTestTransaction();
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await transactionEngine.sendAndConfirm(tx, {
+        timeoutSeconds: 5,
+        retryInterval: 100,
+        skipPreflight: true,
+        enableLogging: true,
+      });
+
+      const allCalls = [...logSpy.mock.calls, ...warnSpy.mock.calls];
+      const fallbackLogs = allCalls.filter(call => 
+        (typeof call[0] === 'string' && call[0].includes('falling back to multi-node polling')) ||
+        (typeof call[1] === 'string' && call[1].includes('falling back to multi-node polling'))
+      );
+      
+      expect(fallbackLogs.length).toBeGreaterThan(0);
+      
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+  });
 });

@@ -36,6 +36,8 @@ export interface SteroidConnectionConfig extends ConnectionConfig {
       latencyScoring?: boolean;
       /** Number of requests to consider for scoring (default: 20) */
       scoringWindow?: number;
+      /** Expected cluster for validation. Emits warning if mismatch. */
+      expectedCluster?: ClusterType;
 }
 
 export interface RPCHealth {
@@ -92,6 +94,8 @@ export interface SteroidSendOptions extends SendOptions {
    * If provided, SteroidTransaction will call this when blockhash is updated.
    */
   onBlockhashRefresh?: (transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+  /** Use WebSocket for confirmation (default: true). Falls back to HTTP polling. */
+  useWebSocket?: boolean;
 }
 
 export enum TransactionState {
@@ -161,12 +165,14 @@ export interface ClientStats {
   allEndpoints: string[];
   failoverStats: FailoverStats;
   healthStatus: RPCHealth[];
+  detectedCluster: ClusterType;
 }
 
 /**
  * Network Types
  */
-export type NetworkType = 'mainnet-beta' | 'devnet' | 'testnet';
+export type ClusterType = 'mainnet-beta' | 'devnet' | 'testnet' | 'localnet' | 'unknown';
+export type NetworkType = ClusterType;
 
 /**
  * Utility Types

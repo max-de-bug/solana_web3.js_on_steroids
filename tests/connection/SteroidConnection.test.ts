@@ -15,7 +15,7 @@ vi.mock('@solana/web3.js', async (importOriginal) => {
           blockhash: '5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA',
           lastValidBlockHeight: 100000,
         }),
-        getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
+        getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
       };
     }),
   };
@@ -225,6 +225,35 @@ describe('SteroidConnection', () => {
       
       // Should have switched to index 1 (fast)
       expect(connection.getActiveEndpoint()).toBe('https://fast.solana.com');
+    });
+  });
+
+  describe('Cluster Detection', () => {
+    it('should detect cluster on initialization', async () => {
+      const connection = new SteroidConnection('https://api.mainnet-beta.solana.com', {
+        healthCheckInterval: 0,
+      });
+
+      // Wait a bit for the async detection to complete or trigger it manually
+      await (connection as any).detectCluster();
+
+      expect(connection.getCluster()).toBe('mainnet-beta');
+      expect(connection.getGenesisHash()).toBe('5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+    });
+
+    it('should emit mismatch event when cluster does not match expected', async () => {
+      const emitter = { emit: vi.fn() } as any;
+      const connection = new SteroidConnection('https://api.mainnet-beta.solana.com', {
+        expectedCluster: 'devnet',
+        healthCheckInterval: 0,
+      }, emitter);
+
+      await (connection as any).detectCluster();
+
+      expect(emitter.emit).toHaveBeenCalledWith('connection:cluster-mismatch', expect.objectContaining({
+        detected: 'mainnet-beta',
+        expected: 'devnet',
+      }));
     });
   });
 });

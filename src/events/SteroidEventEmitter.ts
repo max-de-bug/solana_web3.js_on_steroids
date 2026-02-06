@@ -1,9 +1,4 @@
-/**
- * SteroidEventEmitter - Browser-compatible event emitter for transaction lifecycle events.
- * 
- * Provides real-time callbacks for transaction states and connection health,
- * enabling reactive UIs that respond to the library's internal resilience mechanisms.
- */
+import { ClusterType } from '../types/SteroidWalletTypes.js';
 
 /**
  * Event payload types for all supported events.
@@ -26,6 +21,8 @@ export type SteroidEventMap = {
   // Connection events
   'connection:failover': { from: string; to: string; reason: string };
   'connection:health': { endpoint: string; healthy: boolean; latency?: number };
+  'connection:cluster-detected': { cluster: ClusterType; genesisHash: string };
+  'connection:cluster-mismatch': { detected: ClusterType; expected: ClusterType };
 };
 
 export type SteroidEventKey = keyof SteroidEventMap;

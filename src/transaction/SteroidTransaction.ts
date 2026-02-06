@@ -22,6 +22,7 @@ import {
 } from '../utils/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { WebSocketConfirmation } from '../connection/WebSocketConfirmation.js';
 import { ErrorTranslator, SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
 
 /**
@@ -183,12 +184,33 @@ export class SteroidTransaction {
           this.logger.info(`Transaction sent: ${signature} (attempt ${state.attempts})`);
 
           // 4. Multi-node confirmation check
-          this.logger.info(`Polling for confirmation on ${confirmationNodes} nodes...`);
-          const confirmed = await this.pollForConfirmation(
-            signature,
-            confirmationCommitment,
-            confirmationNodes
-          );
+          const useWebSocket = mergedOptions.useWebSocket !== false;
+          let confirmed = false;
+
+          if (useWebSocket) {
+            this.logger.info(`Attempting WebSocket confirmation for ${signature}...`);
+            confirmed = await WebSocketConfirmation.confirmSignature(
+              this.connection as unknown as Connection,
+              signature,
+              confirmationCommitment,
+              retryInterval // Use retryInterval as the WS wait time before falling back or retrying
+            );
+            
+            if (confirmed) {
+              this.logger.info(`Transaction confirmed via WebSocket: ${signature}`);
+            } else {
+              this.logger.warn(`WebSocket confirmation failed or timed out for ${signature}, falling back to multi-node polling...`);
+            }
+          }
+
+          if (!confirmed) {
+            this.logger.info(`Polling for confirmation on ${confirmationNodes} nodes...`);
+            confirmed = await this.pollForConfirmation(
+              signature,
+              confirmationCommitment,
+              confirmationNodes
+            );
+          }
 
           if (confirmed) {
             this.updateState(stateId, TransactionState.CONFIRMED, signature);
