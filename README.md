@@ -6,6 +6,7 @@ Solana UX today is fragile: wallet adapters leak abstractions, RPC behavior is i
 
 [![NPM Version](https://img.shields.io/npm/v/solana-web3-on-steroids)](https://www.npmjs.com/package/solana-web3-on-steroids)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%23007acc)](https://www.typescriptlang.org/)
 
 ---
 
@@ -45,15 +46,31 @@ Automatically measures compute unit consumption via simulation and fetches netwo
 
 ![Architecture Diagram](docs/assets/architecture.png)
 
----
-
 ### Technical Resilience Flow
-
 ![Technical Flow](docs/assets/architecture-diagram.svg)
 
 ---
 
-## 🚀 Installation
+## 🚀 Key Features
+
+### 1. Transparent RPC Failover & Latency Scoring
+Uses a JS `Proxy` to wrap the `Connection` object. It tracks **Exponential Moving Average (EMA)** latency and success rates for all RPC nodes, automatically selecting the best performer.
+
+### 2. High-Speed WebSocket Confirmation (v1.0.13)
+Prioritizes `onSignature` WebSocket subscriptions for real-time pushed updates. If the WebSocket connection lags or drops, it instantly falls back to multi-node HTTP polling.
+
+### 3. Automatic Cluster Safety Guards
+Identifies the cluster (Mainnet, Devnet, Testnet) via genesis hash on initialization. It prevents "cross-network" accidents by validating the wallet network against the RPC target.
+
+### 4. Smart Transaction "Babysitting"
+The engine handles the entire lifecycle:
+- **Simulation**: Pre-calculates CUs.
+- **Optimization**: Injects optimal priority fees.
+- **Persistence**: Re-fetches blockhashes and re-signs if the transaction ages out.
+
+---
+
+## 📦 Installation
 
 ```bash
 npm install solana-web3-on-steroids
@@ -65,37 +82,34 @@ npm install solana-web3-on-steroids
 import { SteroidClient } from 'solana-web3-on-steroids';
 
 const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
-  fallbacks: [
-    'https://solana-mainnet.rpc.extrnode.com',
-    'https://api.alchemy.com/v2/your-key'
-  ],
-  maxRetries: 5,
+  fallbacks: ['https://solana-mainnet.rpc.extrnode.com'],
+  connection: {
+    latencyScoring: true, // Auto-pick fastest node
+    expectedCluster: 'mainnet-beta' // Safety guard
+  },
   enableLogging: true
 });
 
 // Use it exactly like a standard @solana/web3.js Connection
 const balance = await client.connection.getBalance(myPublicKey);
 
-// Connect a wallet adapter for steroidal transactions
-const steroidWallet = client.connectWallet(walletAdapter, {
-  expectedGenesisHash: '5eykt4UsF...', // Optional safety check
+// Connect a wallet for enhanced transactions
+const steroidWallet = client.connectWallet(walletAdapter);
+
+// Listen to the heartbeat of your infra
+client.on('connection:failover', ({ from, to, reason }) => {
+  console.warn(`Swapping nodes: ${reason}`);
 });
 
-// Listen to real-time events for reactive UX
-client.on('transaction:sent', ({ signature, attempt }) => {
-  console.log(`Transaction ${signature} sent (Attempt ${attempt})`);
+client.on('transaction:confirmed', ({ signature, durationMs }) => {
+  console.log(`Landed in ${durationMs}ms! 🚀`);
 });
 
-client.on('connection:cluster-detected', ({ cluster }) => {
-  console.log(`Connected to: ${cluster}`);
-});
-
-// Send with automatic priority fee optimization & WebSocket confirmation
+// Send with one configuration, the engine does the rest
 const signature = await steroidWallet.signAndSend(transaction, {
-  computeBudget: { feePercentile: 75 }, // Target 75th percentile
-  useWebSocket: true // Default: true, with automatic polling fallback
+  computeBudget: { feePercentile: 75 },
+  useWebSocket: true // Fastest path with resilient fallback, default: true.
 });
-
 ```
 
 ## 🧬 Core Architecture
