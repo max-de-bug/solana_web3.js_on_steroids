@@ -38,6 +38,12 @@ export interface SteroidConnectionConfig extends ConnectionConfig {
       scoringWindow?: number;
       /** Expected cluster for validation. Emits warning if mismatch. */
       expectedCluster?: ClusterType;
+      /** Number of nodes to race for critical requests (default: 0 = disabled) */
+      raceNodes?: number;
+      /** Maximum allowed slot lag before a node is penalized (default: 50) */
+      maxSlotLag?: number;
+      /** Cooldown period after a node is marked unhealthy (default: 60000ms) */
+      unhealthyCooldownMs?: number;
 }
 
 export interface RPCHealth {
@@ -46,6 +52,8 @@ export interface RPCHealth {
   lastChecked: number;
   latency?: number;
   score?: number;
+  lastSlot?: number;
+  lastUnhealthy?: number;
 }
 
 export interface FailoverStats {
@@ -215,7 +223,7 @@ export interface SteroidEvents {
   'transaction:confirmed': { signature: string; attempts: number };
   'transaction:failed': { signature?: string; error: Error };
   'connection:failover': { from: string; to: string };
-  'connection:health-check': { health: RPCHealth[] };
+  'connection:health': { endpoint: string; healthy: boolean; latency?: number; slot?: number };
   'wallet:connected': { publicKey: PublicKey };
   'wallet:disconnected': {};
 }
@@ -232,6 +240,9 @@ export const DEFAULT_CONFIG = {
     enableLogging: false,
     latencyScoring: false,
     scoringWindow: 20,
+    raceNodes: 0,
+    maxSlotLag: 50,
+    unhealthyCooldownMs: 60000,
   },
   TRANSACTION: {
     timeoutSeconds: 60,

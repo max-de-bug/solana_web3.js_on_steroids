@@ -20,7 +20,12 @@ export class SteroidConnection {
   private currentUrlIndex: number = 0;
   private config: SteroidConnectionConfig;
   private steroidConfig: Required<
-    Pick<SteroidConnectionConfig, 'maxRetries' | 'retryDelay' | 'healthCheckInterval' | 'requestTimeout' | 'enableLogging' | 'latencyScoring' | 'scoringWindow'>
+    Pick<
+      SteroidConnectionConfig, 
+      'maxRetries' | 'retryDelay' | 'healthCheckInterval' | 'requestTimeout' | 
+      'enableLogging' | 'latencyScoring' | 'scoringWindow' | 'raceNodes' | 
+      'maxSlotLag' | 'unhealthyCooldownMs'
+    >
   >;
   private healthStatus: Map<string, RPCHealth> = new Map();
   private healthCheckTimer?: NodeJS.Timeout;
@@ -44,6 +49,9 @@ export class SteroidConnection {
       enableLogging: config.enableLogging ?? false,
       latencyScoring: config.latencyScoring ?? false,
       scoringWindow: config.scoringWindow ?? 20,
+      raceNodes: config.raceNodes ?? 0,
+      maxSlotLag: config.maxSlotLag ?? 50,
+      unhealthyCooldownMs: config.unhealthyCooldownMs ?? 60000,
     };
     this.logger = new Logger('SteroidConnection', this.steroidConfig.enableLogging);
 
@@ -86,14 +94,8 @@ export class SteroidConnection {
         // 3. If it's a function, wrap it with retry/failover logic.
         if (typeof value === 'function') {
           const methodName = prop as string;
-          
           return (...args: any[]) => {
-            // Optimization: skip resilience for methods we know don't need it or are standard
-            if (['rpcEndpoint', 'commitment'].includes(methodName)) {
-              return value.apply(target.activeConnection, args);
-            }
-            
-            return target.executeWithResilience(methodName, value, args);
+            return target.executeWithResilience(methodName, args);
           };
         }
 
@@ -105,7 +107,70 @@ export class SteroidConnection {
   /**
    * Executes a connection method with intelligent retries and failover.
    */
-  private async executeWithResilience(methodName: string, method: Function, args: any[]): Promise<any> {
+  private async executeWithResilience(methodName: string, args: any[]): Promise<any> {
+    // If racing is enabled and we have multiple nodes, use the race strategy
+    if (this.steroidConfig.raceNodes > 0 && this.urls.length > 1) {
+        return this.executeWithConcurrentRace(methodName, args);
+    }
+
+    return this.executeWithResilienceStandard(methodName, args);
+  }
+
+  /**
+   * Executes a request concurrently against multiple nodes and returns the fastest result.
+   */
+  private async executeWithConcurrentRace(methodName: string, args: any[]): Promise<any> {
+    // Pick top N healthy nodes
+    const topIndices: number[] = [];
+    const attempted = new Set<number>();
+    
+    for (let i = 0; i < Math.min(this.steroidConfig.raceNodes, this.urls.length); i++) {
+        const index = this.findNextAvailableRpcIndex(attempted);
+        if (index !== -1) {
+            topIndices.push(index);
+            attempted.add(index);
+        }
+    }
+
+    // If we only have one node to race, just use standard execution (though it shouldn't happen with urls.length > 1)
+    if (topIndices.length <= 1) {
+        return this.executeWithResilienceStandard(methodName, args);
+    }
+
+    this.logger.info(`Racing ${topIndices.length} nodes for ${methodName}`);
+
+    const racePromises = topIndices.map(async (idx) => {
+        const url = this.urls[idx];
+        const tempConn = idx === this.currentUrlIndex ? this.activeConnection : new Connection(url, this.config);
+        const startTime = Date.now();
+        
+        try {
+            const result = await this.callWithTimeout(methodName, args, tempConn, this.steroidConfig.requestTimeout);
+            const latency = Date.now() - startTime;
+            this.scorer?.recordSuccess(url, latency);
+            this.updateHealthStatus(url, true, latency, undefined);
+            return result;
+        } catch (error: any) {
+            this.scorer?.recordFailure(url);
+            throw error;
+        }
+    });
+
+    try {
+        // Promise.any returns the first successfully fulfilled promise
+        return await Promise.any(racePromises);
+    } catch (error: any) {
+        // If all failed, AggregateError is thrown (in modern JS) or we just throw the last one
+        this.logger.error(`All concurrent requests failed for ${methodName}`);
+        throw this.enhanceError(error, methodName, 1);
+    }
+  }
+
+  /**
+   * Standard execution path without racing.
+   */
+  private async executeWithResilienceStandard(methodName: string, args: any[]): Promise<any> {
+    // This is essentially parts of the old executeWithResilience
     const attemptedUrls = new Set<number>();
     let lastError: any;
 
@@ -115,7 +180,7 @@ export class SteroidConnection {
       
       try {
         const result = await this.callWithTimeout(
-          method, 
+          methodName, 
           args, 
           this.activeConnection, 
           this.steroidConfig.requestTimeout
@@ -123,24 +188,18 @@ export class SteroidConnection {
         
         const latency = Date.now() - startTime;
         this.scorer?.recordSuccess(currentUrl, latency);
-        this.updateHealthStatus(currentUrl, true, latency);
+        this.updateHealthStatus(currentUrl, true, latency, undefined);
         
         return result;
       } catch (error: any) {
         this.scorer?.recordFailure(currentUrl);
-        // Map AbortError from our controller to a "Request timeout" message for consistency
         lastError = error.name === 'AbortError' ? new Error('Request timeout') : error;
-        attemptedUrls.add(this.currentUrlIndex);
-        
         this.logger.warn(`Method ${methodName} failed (attempt ${attempt + 1}/${this.steroidConfig.maxRetries}):`, lastError.message);
 
         const shouldRetry = await this.handleExecutionError(lastError, methodName, attempt, attemptedUrls);
-        if (!shouldRetry) {
-          throw this.enhanceError(lastError, methodName, attempt + 1);
-        }
+        if (!shouldRetry) throw this.enhanceError(lastError, methodName, attempt + 1);
       }
     }
-
     throw this.enhanceError(lastError, methodName, this.steroidConfig.maxRetries);
   }
 
@@ -149,7 +208,7 @@ export class SteroidConnection {
    * This effectively cancels the underlying network request on timeout.
    */
   private async callWithTimeout(
-    method: Function, 
+    methodName: string, 
     args: any[], 
     target: any, 
     timeoutMs: number
@@ -158,6 +217,11 @@ export class SteroidConnection {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const method = target[methodName];
+      if (typeof method !== 'function') {
+        throw new Error(`Method ${methodName} not found on target`);
+      }
+
       // 1. Check if the method likely accepts a config object with an AbortSignal
       // Many web3.js methods take an optional config as the last argument
       const lastArg = args[args.length - 1];
@@ -174,16 +238,26 @@ export class SteroidConnection {
   /**
    * Updates health status for a specific URL.
    */
-  private updateHealthStatus(url: string, healthy: boolean, latency?: number): void {
+  private updateHealthStatus(url: string, healthy: boolean, latency?: number, slot?: number): void {
     const health = this.healthStatus.get(url);
     if (health) {
       health.healthy = healthy;
       health.lastChecked = Date.now();
+      
+      if (!healthy) {
+        health.lastUnhealthy = Date.now();
+      }
+
       if (latency !== undefined) {
         health.latency = latency;
       }
+      
+      if (slot !== undefined) {
+        health.lastSlot = slot;
+      }
+
       if (this.scorer) {
-        health.score = this.scorer.getScore(url);
+        health.score = this.scorer.getScore(url, this.steroidConfig.maxSlotLag);
       }
     }
   }
@@ -203,8 +277,8 @@ export class SteroidConnection {
 
     // 2. Node Failure -> Mark unhealthy and try next if available
     if (this.isNodeFailure(error)) {
-      this.logger.error(`Node failure detected at ${this.getActiveEndpoint()}:`, error.message);
-      this.updateHealthStatus(this.urls[this.currentUrlIndex], false);
+      this.logger.error(`Node failure detected during ${methodName} at ${this.getActiveEndpoint()}:`, error.message);
+      this.updateHealthStatus(this.urls[this.currentUrlIndex], false, undefined, undefined);
 
       if (this.urls.length > 1 && attemptedUrls.size < this.urls.length) {
         await this.switchToNextRpc(attemptedUrls);
@@ -290,9 +364,16 @@ export class SteroidConnection {
    * Finds the index of the next healthy RPC, or the very next one if all are unhealthy.
    */
   private findNextAvailableRpcIndex(attemptedUrls: Set<number>): number {
+    const now = Date.now();
+
     // 1. If latency scoring is enabled, pick the best node
     if (this.scorer) {
-      const bestIndex = this.scorer.getBestUrlIndex(this.urls, this.healthStatus, attemptedUrls);
+      const bestIndex = this.scorer.getBestUrlIndex(
+        this.urls, 
+        this.healthStatus, 
+        attemptedUrls,
+        this.steroidConfig.maxSlotLag
+      );
       if (bestIndex !== -1) return bestIndex;
     }
 
@@ -301,9 +382,17 @@ export class SteroidConnection {
     // 2. Try to find the next healthy RPC starting from the next in line
     for (let i = 0; i < this.urls.length; i++) {
       const index = (startIndex + i) % this.urls.length;
+      const url = this.urls[index];
+      const health = this.healthStatus.get(url);
+      
       // Only consider URLs not yet attempted in the current resilience loop
-      if (!attemptedUrls.has(index) && this.healthStatus.get(this.urls[index])?.healthy) {
-        return index;
+      if (!attemptedUrls.has(index)) {
+        // Circuit Breaker: check if node is in cooldown
+        const isCooldown = health?.lastUnhealthy && (now - health.lastUnhealthy < this.steroidConfig.unhealthyCooldownMs);
+        
+        if (health?.healthy && !isCooldown) {
+            return index;
+        }
       }
     }
     
@@ -344,20 +433,22 @@ export class SteroidConnection {
       const tempConn = new Connection(url, { commitment: 'confirmed' });
       
       // We use getSlot as a lightweight "ping"
-      await this.callWithTimeout(
-        tempConn.getSlot,
+      const slot = await this.callWithTimeout(
+        'getSlot',
         [],
         tempConn,
         SteroidConnection.DEFAULT_HEALTH_CHECK_TIMEOUT_MS
       );
       
       const latency = Date.now() - startTime;
+      this.scorer?.recordSlot(url, slot);
       this.scorer?.recordSuccess(url, latency);
-      this.updateHealthStatus(url, true, latency);
-      this.emitter?.emit('connection:health', { endpoint: url, healthy: true, latency });
-      this.log('info', `Health check passed for ${url} (${latency}ms)`);
+      this.updateHealthStatus(url, true, latency, slot);
+      
+      this.emitter?.emit('connection:health', { endpoint: url, healthy: true, latency, slot });
+      this.log('info', `Health check passed for ${url} (Slot: ${slot}, ${latency}ms)`);
     } catch (error: any) {
-      this.updateHealthStatus(url, false);
+      this.updateHealthStatus(url, false, undefined, undefined);
       this.scorer?.recordFailure(url);
       this.emitter?.emit('connection:health', { endpoint: url, healthy: false });
       this.log('warn', `Health check failed for ${url}:`, error.message);

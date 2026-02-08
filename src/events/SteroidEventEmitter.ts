@@ -20,7 +20,7 @@ export type SteroidEventMap = {
   
   // Connection events
   'connection:failover': { from: string; to: string; reason: string };
-  'connection:health': { endpoint: string; healthy: boolean; latency?: number };
+  'connection:health': { endpoint: string; healthy: boolean; latency?: number; slot?: number };
   'connection:cluster-detected': { cluster: ClusterType; genesisHash: string };
   'connection:cluster-mismatch': { detected: ClusterType; expected: ClusterType };
 };

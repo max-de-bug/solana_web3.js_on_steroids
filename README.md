@@ -54,10 +54,10 @@ Automatically measures compute unit consumption via simulation and fetches netwo
 ## 🚀 Key Features
 
 ### 1. Transparent RPC Failover & Latency Scoring
-Uses a JS `Proxy` to wrap the `Connection` object. It tracks **Exponential Moving Average (EMA)** latency and success rates for all RPC nodes, automatically selecting the best performer.
+Uses a JS `Proxy` to wrap the `Connection` object. It tracks **Exponential Moving Average (EMA)** latency, success rates, and **Slot Lag** for all RPC nodes, automatically selecting the healthiest and fastest performer.
 
-### 2. High-Speed WebSocket Confirmation (v1.0.13)
-Prioritizes `onSignature` WebSocket subscriptions for real-time pushed updates. If the WebSocket connection lags or drops, it instantly falls back to multi-node HTTP polling.
+### 2. Concurrent Race Strategy (Adaptive)
+When nodes fail or underperform, the engine can concurrently race requests against the top $N$ healthy nodes, returning the fastest result to minimize latency spikes during failovers.
 
 ### 3. Automatic Cluster Safety Guards
 Identifies the cluster (Mainnet, Devnet, Testnet) via genesis hash on initialization. It prevents "cross-network" accidents by validating the wallet network against the RPC target.
@@ -85,7 +85,9 @@ const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
   fallbacks: ['https://solana-mainnet.rpc.extrnode.com'],
   connection: {
     latencyScoring: true, // Auto-pick fastest node
-    expectedCluster: 'mainnet-beta' // Safety guard
+    raceNodes: 2,         // Race top 2 nodes on failure
+    maxSlotLag: 50,       // Penalize nodes lagging by >50 slots
+    expectedCluster: 'mainnet-beta' 
   },
   enableLogging: true
 });
@@ -116,7 +118,9 @@ const signature = await steroidWallet.signAndSend(transaction, {
 
 ### `SteroidConnection`
 A resilient proxy for `web3.js.Connection`.
-- **Health Heartbeat**: Background pings monitor latency and uptime across all fallbacks.
+- **Health Heartbeat**: Background pings monitor latency, uptime, and **Slot Lag** across all fallbacks.
+- **Concurrent Racing**: Optional parallel request execution to neutralize node-specific latency spikes.
+- **Circuit Breaker**: Automatic cooldown periods for unstable nodes to prevent retry-loop fatigue.
 - **Cluster Awareness**: Automatic genesis hash validation and cluster mismatch protection.
 - **Error classification**: Distinguishes between **Transient** errors and **Node Failures**.
 

@@ -3,11 +3,23 @@ import { RPCHealth } from '../types/SteroidWalletTypes.js';
 export class RpcScorer {
   private latencyHistory: Map<string, number[]> = new Map();
   private errorHistory: Map<string, number[]> = new Map();
+  private slotHistory: Map<string, number> = new Map();
+  private maxClusterSlot: number = 0;
   private readonly windowSize: number;
   private readonly alpha = 0.3; // Smoothing factor for EMA (0.3 = 30% weight to new value)
 
   constructor(windowSize: number = 20) {
     this.windowSize = windowSize;
+  }
+
+  /**
+   * Records the current slot for a given URL and updates the cluster maximum.
+   */
+  public recordSlot(url: string, slot: number): void {
+    this.slotHistory.set(url, slot);
+    if (slot > this.maxClusterSlot) {
+      this.maxClusterSlot = slot;
+    }
   }
 
   /**
@@ -44,11 +56,12 @@ export class RpcScorer {
 
   /**
    * Calculates the score for all URLs and returns the best one.
-   * Score = (1 / EMA_Latency) * (SuccessRate^2)
+   * Score = (1 / EMA_Latency) * (SuccessRate^2) * (1 / (1 + SlotLag))
    */
-  public getScore(url: string): number {
+  public getScore(url: string, maxSlotLag: number = 50): number {
     const latencyHistory = this.latencyHistory.get(url) || [];
     const errorHistory = this.errorHistory.get(url) || [];
+    const lastSlot = this.slotHistory.get(url) || 0;
 
     if (latencyHistory.length === 0) return 0;
 
@@ -62,10 +75,15 @@ export class RpcScorer {
     const failures = errorHistory.reduce((sum, val) => sum + val, 0);
     const successRate = 1 - (failures / (errorHistory.length || 1));
 
+    // Calculate Slot Lag Penalty
+    const lag = Math.max(0, this.maxClusterSlot - lastSlot);
+    // If lag exceeds threshold, apply exponential penalty
+    const lagPenalty = lag > maxSlotLag ? Math.pow(0.5, (lag - maxSlotLag) / 10) : 1;
+
     // Calculate Score
     // We use successRate^2 to heavily penalize nodes with even a few errors
     // We use 1000/ema to normalize latency into a human-readable scale where higher is better
-    const score = (1000 / (ema || 1)) * Math.pow(successRate, 2);
+    const score = (1000 / (ema || 1)) * Math.pow(successRate, 2) * lagPenalty;
     
     return score;
   }
@@ -74,7 +92,12 @@ export class RpcScorer {
    * Picks the best healthy RPC node from the list based on scores.
    * If scores are tied or missing, falls back to original order.
    */
-  public getBestUrlIndex(urls: string[], healthMap: Map<string, RPCHealth>, excludeIndices: Set<number> = new Set()): number {
+  public getBestUrlIndex(
+    urls: string[], 
+    healthMap: Map<string, RPCHealth>, 
+    excludeIndices: Set<number> = new Set(),
+    maxSlotLag: number = 50
+  ): number {
     let bestIndex = -1;
     let maxScore = -1;
 
@@ -87,7 +110,7 @@ export class RpcScorer {
         // Only consider healthy nodes
         if (!health || !health.healthy) continue;
 
-        const score = this.getScore(url);
+        const score = this.getScore(url, maxSlotLag);
         
         // If we haven't found any node yet, or this node has a better score
         if (bestIndex === -1 || score > maxScore) {

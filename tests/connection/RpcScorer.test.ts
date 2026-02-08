@@ -79,4 +79,20 @@ describe('RpcScorer', () => {
         const bestIndex = scorer.getBestUrlIndex(urls, healthMap, new Set([0]));
         expect(bestIndex).toBe(1);
     });
+
+    it('should penalize stalled nodes (slot lag)', () => {
+        scorer.recordSuccess(url1, 100);
+        scorer.recordSuccess(url2, 200);
+
+        // url1 is twice as fast, but let's say it's stalled
+        scorer.recordSlot(url1, 1000); // Stuck at 1000
+        scorer.recordSlot(url2, 1100); // Cluster is at 1100
+
+        // With default maxSlotLag=50, 100 slot lag should be penalized
+        const score1 = scorer.getScore(url1, 50);
+        const score2 = scorer.getScore(url2, 50);
+
+        // url2 should now have a higher score despite being slower because url1 is stalled
+        expect(score2).toBeGreaterThan(score1);
+    });
 });
