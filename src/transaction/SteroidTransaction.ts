@@ -24,6 +24,7 @@ import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
 import { WebSocketConfirmation } from '../connection/WebSocketConfirmation.js';
 import { ErrorTranslator, SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
+import bs58 from 'bs58';
 
 /**
  * Enhanced transaction handling with state management, automatic retries,
@@ -95,11 +96,13 @@ export class SteroidTransaction {
         ? transaction.signatures.some(s => s.signature !== null)
         : (transaction as VersionedTransaction).signatures.length > 0;
 
-      if (mergedOptions.computeBudget !== false && isLegacyTransaction(transaction) && !isSigned) {
+      if (mergedOptions.computeBudget !== false && !isSigned) {
         const budgetConfig: ComputeBudgetConfig = 
           typeof mergedOptions.computeBudget === 'object' 
             ? mergedOptions.computeBudget 
             : {};
+        
+        // ComputeBudgetOptimizer now supports both Legacy and Versioned
         const estimate = await this.computeOptimizer.estimateComputeBudget(transaction, budgetConfig);
         computeUnitsEstimated = estimate.computeUnits;
         transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
@@ -128,7 +131,8 @@ export class SteroidTransaction {
 
       // 3. Send and retry loop with blockhash refresh
       while (Date.now() - startTime < executionTimeout) {
-        try {
+          let wsWaitStart = 0;
+          try {
           attempts++;
           state.attempts = attempts; // Update state attempts
           state.lastAttemptTime = Date.now();
@@ -169,14 +173,38 @@ export class SteroidTransaction {
               skipPreflight: true,
               maxRetries: 0, // We handle retries ourselves
             });
-            this.logger.info(`Transaction sent: ${signature}`);
           } catch (sendError: any) {
+            const errorMsg = sendError.message || '';
             if (isBlockhashExpiredError(sendError)) {
               this.logger.warn('Blockhash expired during send, refreshing...');
               lastBlockhashRefresh = 0; // Force refresh on next iteration
-              continue; // Skip to next iteration to refresh blockhash
+              continue; 
             }
-            throw sendError; // Re-throw other errors
+            // Handle "Already processed" - often happens if a previous node got it but we didn't confirm yet
+            if (errorMsg.includes('already processed') || errorMsg.includes('0x0')) {
+                this.logger.info('Transaction already processed or exists on some nodes, waiting for confirmation...');
+                
+                // Extract signature from transaction to ensure we can poll for it
+                if (!signature) {
+                   try {
+                     if (isLegacyTransaction(transaction)) {
+                       // Use the first signature if it exists
+                       if (transaction.signature) {
+                          signature = bs58.encode(transaction.signature);
+                       }
+                     } else {
+                       const vTx = transaction as VersionedTransaction;
+                       if (vTx.signatures.length > 0) {
+                          signature = bs58.encode(vTx.signatures[0]);
+                       }
+                     }
+                   } catch (sigError) {
+                     this.logger.warn('Failed to extract signature for already-processed transaction');
+                   }
+                }
+            } else {
+                throw sendError; 
+            }
           }
 
           this.updateState(stateId, TransactionState.SENT, signature);
@@ -188,6 +216,7 @@ export class SteroidTransaction {
           let confirmed = false;
 
           if (useWebSocket) {
+            wsWaitStart = Date.now();
             this.logger.info(`Attempting WebSocket confirmation for ${signature}...`);
             confirmed = await WebSocketConfirmation.confirmSignature(
               this.connection as unknown as Connection,
@@ -238,7 +267,12 @@ export class SteroidTransaction {
           }
         }
 
-        await sleep(retryInterval);
+        // Optimized sleep: If we already waited for WS confirmation, don't sleep again
+        const alreadyWaited = wsWaitStart > 0 ? (Date.now() - wsWaitStart) : 0;
+        const remainingSleep = Math.max(0, retryInterval - alreadyWaited);
+        if (remainingSleep > 0) {
+           await sleep(remainingSleep);
+        }
 
         // Check for abort after sleep
         this.checkAbortSignal(abortSignal, stateId, state);
@@ -278,19 +312,33 @@ export class SteroidTransaction {
   ): Promise<void> {
     try {
       this.logger.info('Simulating transaction...');
-      const simulation = await (this.connection as any).simulateTransaction(transaction, {
-        commitment,
-        replaceRecentBlockhash: true,
+      
+      // Multi-node simulation to detect state lag/inconsistency
+      const endpoints = this.connection.getEndpoints().slice(0, 2); // Sim on up to 2 nodes
+      const simPromises = endpoints.map(async (url) => {
+          const conn = new Connection(url);
+          return conn.simulateTransaction(transaction as any, { commitment, replaceRecentBlockhash: true });
       });
 
-      if (simulation.value.err) {
-        const errorDetails = parseSimulationError(simulation.value);
-        this.logger.error(`Simulation failed: ${errorDetails}`);
-        throw ErrorTranslator.simulationFailed(errorDetails);
+      const results = await Promise.allSettled(simPromises);
+      const successfulSim = results.find(r => r.status === 'fulfilled' && !r.value.value.err) as PromiseFulfilledResult<any> | undefined;
+
+      if (!successfulSim) {
+        // Find the first error if all failed
+        const errorResult = results.find(r => r.status === 'fulfilled' && r.value.value.err) as PromiseFulfilledResult<any> | undefined;
+        if (errorResult) {
+            const errorDetails = parseSimulationError(errorResult.value.value);
+            this.logger.error(`Simulation failed on all nodes: ${errorDetails}`);
+            throw ErrorTranslator.simulationFailed(errorDetails);
+        }
+        // If actually rejected (network error)
+        const rejected = results.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        throw rejected ? rejected.reason : new Error('Simulation failed on all nodes');
       }
 
-      if (simulation.value.logs) {
-        this.logger.info(`Simulation succeeded. Logs count: ${simulation.value.logs.length}`);
+      this.logger.info(`Simulation succeeded on at least one node.`);
+      if (successfulSim.value.value.logs) {
+        this.logger.info(`Simulation logs count: ${successfulSim.value.value.logs.length}`);
       }
     } catch (error: any) {
       // Re-throw SteroidError as-is (already translated)

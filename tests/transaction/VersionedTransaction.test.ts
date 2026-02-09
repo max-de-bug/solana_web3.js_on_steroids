@@ -59,7 +59,7 @@ describe('Versioned Transaction Blockhash Support', () => {
       getEndpoints: vi.fn().mockReturnValue(['https://mock.solana.com']),
       getActiveEndpoint: vi.fn().mockReturnValue('https://mock.solana.com'),
       getLatestBlockhash: vi.fn().mockResolvedValue({
-        blockhash: 'new-blockhash-' + Math.random(),
+        blockhash: '4bt666uThVzR5HUKtXF1SAbH1t4XQzGfNqQ4GqQ4GqQ4', // Valid base58-ish
         lastValidBlockHeight: 123456,
       }),
       sendRawTransaction: vi.fn().mockResolvedValue('test-sig'),
@@ -80,11 +80,19 @@ describe('Versioned Transaction Blockhash Support', () => {
     await transactionEngine.sendAndConfirm(tx, {
       skipPreflight: true,
       maxBlockhashAge: 60,
+      useWebSocket: false, // Speed up test
+      retryInterval: 100,
+      enableLogging: true,
     });
 
-    const finalBlockhash = getTransactionBlockhash(tx);
-    expect(finalBlockhash).not.toBe(initialBlockhash);
-    expect(finalBlockhash).toMatch(/^new-blockhash-/);
+    // We can't easily check the internal updated transaction from here
+    // but the test passing would mean the loop finished successfully.
+    // To verify blockhash was applied, we'd need to spy on sendRawTransaction
+    expect(mockConnection.sendRawTransaction).toHaveBeenCalled();
+    const sentBuffer = mockConnection.sendRawTransaction.mock.calls[0][0];
+    // If it was a VersionedTransaction, we can de-serialize and check
+    const sentTx = VersionedTransaction.deserialize(sentBuffer);
+    expect(sentTx.message.recentBlockhash).toBe('4bt666uThVzR5HUKtXF1SAbH1t4XQzGfNqQ4GqQ4GqQ4');
   });
 
   it('should refresh blockhash for Versioned Transaction during retries', async () => {
@@ -94,7 +102,7 @@ describe('Versioned Transaction Blockhash Support', () => {
     mockConnection.getLatestBlockhash = vi.fn().mockImplementation(() => {
         hashCalls++;
         return Promise.resolve({
-            blockhash: `hash-${hashCalls}`,
+            blockhash: `4bt666uThVzR5HUKtXF1SAbH1t4XQzGfNqQ4GqQ4Gq${hashCalls}`, // Keep it base58-ish
             lastValidBlockHeight: 300000,
         });
     });

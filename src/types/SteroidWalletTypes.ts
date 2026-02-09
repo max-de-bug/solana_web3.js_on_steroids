@@ -54,6 +54,8 @@ export interface RPCHealth {
   score?: number;
   lastSlot?: number;
   lastUnhealthy?: number;
+  /** Number of consecutive failures for circuit breaker logic */
+  consecutiveFailures?: number;
 }
 
 export interface FailoverStats {

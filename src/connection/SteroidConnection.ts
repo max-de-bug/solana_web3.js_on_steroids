@@ -14,6 +14,7 @@ import { ClusterDetector } from './ClusterDetector.js';
 export class SteroidConnection {
   private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
   private static readonly MAX_BACKOFF_DELAY_MS = 30000;
+  private static readonly CIRCUIT_BREAKER_THRESHOLD = 3; // Number of consecutive failures
 
   private activeConnection: Connection;
   private urls: string[];
@@ -84,12 +85,14 @@ export class SteroidConnection {
     return new Proxy(this, {
       get(target, prop, receiver) {
         // 1. If the property exists on our wrapper, use it.
-        if (prop in target) {
-          return Reflect.get(target, prop, receiver);
+        const targetValue = Reflect.get(target, prop, receiver);
+        if (prop in target && targetValue !== undefined) {
+          return targetValue;
         }
 
         // 2. Otherwise, forward to the active Connection instance.
-        const value = Reflect.get(target.activeConnection, prop, target.activeConnection);
+        const activeConn = target.activeConnection;
+        const value = Reflect.get(activeConn, prop, activeConn);
 
         // 3. If it's a function, wrap it with retry/failover logic.
         if (typeof value === 'function') {
@@ -101,7 +104,7 @@ export class SteroidConnection {
 
         return value;
       },
-    }) as any as SteroidConnection & Connection;
+    }) as unknown as SteroidConnection & Connection;
   }
 
   /**
@@ -259,6 +262,13 @@ export class SteroidConnection {
       if (this.scorer) {
         health.score = this.scorer.getScore(url, this.steroidConfig.maxSlotLag);
       }
+
+      // Track consecutive failures for circuit breaker
+      if (healthy) {
+        health.consecutiveFailures = 0;
+      } else {
+        health.consecutiveFailures = (health.consecutiveFailures || 0) + 1;
+      }
     }
   }
 
@@ -269,8 +279,12 @@ export class SteroidConnection {
   private async handleExecutionError(error: any, methodName: string, attempt: number, attemptedUrls: Set<number>): Promise<boolean> {
     // 1. Transient Error (Rate limit, etc.) -> Just retry
     if (this.isTransientError(error)) {
-      const delay = calculateBackoff(attempt + 1, 1000, SteroidConnection.MAX_BACKOFF_DELAY_MS);
-      this.logger.info(`Retrying after ${delay.toFixed(0)}ms due to transient error`);
+      const baseDelay = calculateBackoff(attempt + 1, 1000, SteroidConnection.MAX_BACKOFF_DELAY_MS);
+      // Add jitter (±20%)
+      const jitter = (Math.random() * 0.4 - 0.2) * baseDelay;
+      const delay = Math.min(SteroidConnection.MAX_BACKOFF_DELAY_MS, baseDelay + jitter);
+      
+      this.logger.info(`Retrying after ${delay.toFixed(0)}ms due to transient error (with jitter)`);
       await sleep(delay);
       return true; 
     }
@@ -387,10 +401,11 @@ export class SteroidConnection {
       
       // Only consider URLs not yet attempted in the current resilience loop
       if (!attemptedUrls.has(index)) {
-        // Circuit Breaker: check if node is in cooldown
+        // Circuit Breaker: check if node is in cooldown or has too many failures
         const isCooldown = health?.lastUnhealthy && (now - health.lastUnhealthy < this.steroidConfig.unhealthyCooldownMs);
+        const isCircuitOpen = (health as any)?.consecutiveFailures >= SteroidConnection.CIRCUIT_BREAKER_THRESHOLD;
         
-        if (health?.healthy && !isCooldown) {
+        if (health?.healthy && !isCooldown && !isCircuitOpen) {
             return index;
         }
       }

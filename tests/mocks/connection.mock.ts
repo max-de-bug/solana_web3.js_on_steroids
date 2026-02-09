@@ -31,6 +31,8 @@ export function createMockConnection(overrides: Partial<Connection> = {}): Conne
     getRecentPrioritizationFees: vi.fn().mockResolvedValue([
       { prioritizationFee: 1000 },
     ]),
+    onSignature: vi.fn().mockReturnValue(123),
+    removeSignatureListener: vi.fn().mockReturnValue(true),
     ...overrides,
   };
 

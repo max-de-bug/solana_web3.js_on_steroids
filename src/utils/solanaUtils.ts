@@ -121,8 +121,9 @@ export function isTransactionSigned(
   if (isLegacyTransaction(transaction)) {
     return transaction.signatures.some(sig => sig.signature !== null);
   }
+  // For versioned, check if there's any non-zero signature
   return transaction.signatures.length > 0 && 
-         transaction.signatures.some(sig => sig.every(byte => byte !== 0));
+         transaction.signatures.some(sig => sig.some(byte => byte !== 0));
 }
 
 /**
