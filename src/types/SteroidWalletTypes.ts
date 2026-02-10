@@ -59,26 +59,13 @@ export interface RPCHealth {
 }
 
 export interface FailoverStats {
-count: number;
-lastTime: number;
-
+  count: number;
+  lastTime: number;
 }
 
-/**
- * Configuration for compute budget optimization.
- */
-export interface ComputeBudgetConfig {
-  /** Safety margin multiplier for compute units (default: 1.2 = 20% buffer) */
-  unitMargin?: number;
-  /** Percentile of recent priority fees to use (default: 75) */
-  feePercentile?: number;
-  /** Maximum priority fee in microLamports (default: 1_000_000) */
-  maxPriorityFee?: number;
-  /** Enable priority fee injection (default: true) */
-  enablePriorityFees?: boolean;
-  /** Enable compute unit limit injection (default: true) */
-  enableComputeUnitLimit?: boolean;
-}
+// ComputeBudgetConfig is canonically defined in ../compute/ComputeBudgetOptimizer.ts
+import type { ComputeBudgetConfig } from '../compute/ComputeBudgetOptimizer.js';
+export type { ComputeBudgetConfig };
 
 export interface SteroidSendOptions extends SendOptions {
   timeoutSeconds?: number;
@@ -182,7 +169,6 @@ export interface ClientStats {
  * Network Types
  */
 export type ClusterType = 'mainnet-beta' | 'devnet' | 'testnet' | 'localnet' | 'unknown';
-export type NetworkType = ClusterType;
 
 /**
  * Utility Types
@@ -215,20 +201,7 @@ export type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
 };
 
-/**
- * Event types for potential event emitter implementation
- */
-export interface SteroidEvents {
-  'transaction:pending': { signature?: string };
-  'transaction:simulated': { signature?: string };
-  'transaction:sent': { signature: string };
-  'transaction:confirmed': { signature: string; attempts: number };
-  'transaction:failed': { signature?: string; error: Error };
-  'connection:failover': { from: string; to: string };
-  'connection:health': { endpoint: string; healthy: boolean; latency?: number; slot?: number };
-  'wallet:connected': { publicKey: PublicKey };
-  'wallet:disconnected': {};
-}
+
 
 /**
  * Constants
@@ -262,14 +235,3 @@ export const DEFAULT_CONFIG = {
   },
 } as const;
 
-/**
- * Export type for package consumers
- */
-export interface SteroidWalletPackage {
-  SteroidClient: any;
-  SteroidConnection: any;
-  SteroidTransaction: any;
-  SteroidWallet: any;
-  WalletError: any;
-  createSteroidClient: any;
-}

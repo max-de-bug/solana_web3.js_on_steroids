@@ -205,7 +205,7 @@ export class ComputeBudgetOptimizer {
     transaction: Transaction | VersionedTransaction
   ): Promise<number> {
     try {
-      const simulation = await (this.connection as any).simulateTransaction(transaction, {
+      const simulation = await (this.connection.getConnection() as any).simulateTransaction(transaction, {
         replaceRecentBlockhash: true,
         sigVerify: false,
       });
@@ -243,7 +243,7 @@ export class ComputeBudgetOptimizer {
 
     try {
       // getRecentPrioritizationFees returns fees for recent slots
-      const fees = await (this.connection as any).getRecentPrioritizationFees();
+      const fees = await this.connection.getConnection().getRecentPrioritizationFees();
 
       if (!Array.isArray(fees) || fees.length === 0) {
         this.logger.info('No recent priority fees available, using 0');

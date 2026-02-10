@@ -7,7 +7,8 @@ import {
   BlockhashWithExpiryBlockHeight,
 } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
-import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CONFIG, ComputeBudgetConfig } from '../types/SteroidWalletTypes.js';
+import { SteroidSendOptions, TransactionState, TransactionStateInfo, DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
+import type { ComputeBudgetConfig } from '../compute/ComputeBudgetOptimizer.js';
 import { 
   isLegacyTransaction, 
   sleep, 
@@ -31,6 +32,8 @@ import bs58 from 'bs58';
  * blockhash refresh, and multi-node confirmation.
  */
 export class SteroidTransaction {
+  private static readonly DEFAULT_STATE_TTL_MS = 3_600_000; // 1 hour
+
   private connection: SteroidConnection;
   private transactionStates: Map<string, TransactionStateInfo> = new Map();
   private logger: Logger;
@@ -169,7 +172,7 @@ export class SteroidTransaction {
           this.logger.info(`Sending transaction (Attempt ${attempts})...`);
           try {
             const rawTransaction = serializeTransaction(transaction);
-            signature = await (this.connection as any).sendRawTransaction(rawTransaction, {
+            signature = await this.connection.getConnection().sendRawTransaction(rawTransaction, {
               skipPreflight: true,
               maxRetries: 0, // We handle retries ourselves
             });
@@ -403,11 +406,17 @@ export class SteroidTransaction {
   private async getFreshBlockhash(): Promise<BlockhashWithExpiryBlockHeight> {
     try {
       this.logger.info('Fetching fresh blockhash...');
-      const { blockhash, lastValidBlockHeight } = await (this.connection as any).getLatestBlockhash('confirmed');
+      const { blockhash, lastValidBlockHeight } = await this.connection.getConnection().getLatestBlockhash('confirmed');
       this.logger.info(`Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`);
       return { blockhash, lastValidBlockHeight };
     } catch (error: any) {
-      throw new Error(`[SteroidTransaction] Failed to get blockhash: ${error.message}`);
+      throw new SteroidError({
+        code: ErrorCode.CONNECTION_FAILED,
+        category: ErrorCategory.NETWORK,
+        userMessage: 'Failed to get blockhash',
+        suggestion: 'Check your connection and try again',
+        originalError: error,
+      });
     }
   }
 
@@ -470,7 +479,7 @@ export class SteroidTransaction {
   /**
    * Clear old transaction states (cleanup).
    */
-  public clearOldStates(olderThanMs: number = 3600000): void {
+  public clearOldStates(olderThanMs: number = SteroidTransaction.DEFAULT_STATE_TTL_MS): void {
     clearExpiredEntries(this.transactionStates, olderThanMs);
   }
 }

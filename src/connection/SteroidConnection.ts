@@ -14,7 +14,8 @@ import { ClusterDetector } from './ClusterDetector.js';
 export class SteroidConnection {
   private static readonly DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5000;
   private static readonly MAX_BACKOFF_DELAY_MS = 30000;
-  private static readonly CIRCUIT_BREAKER_THRESHOLD = 3; // Number of consecutive failures
+  private static readonly CIRCUIT_BREAKER_THRESHOLD = 3;
+  private static readonly JITTER_FACTOR = 0.2;
 
   private activeConnection: Connection;
   private urls: string[];
@@ -279,10 +280,12 @@ export class SteroidConnection {
   private async handleExecutionError(error: any, methodName: string, attempt: number, attemptedUrls: Set<number>): Promise<boolean> {
     // 1. Transient Error (Rate limit, etc.) -> Just retry
     if (this.isTransientError(error)) {
-      const baseDelay = calculateBackoff(attempt + 1, 1000, SteroidConnection.MAX_BACKOFF_DELAY_MS);
-      // Add jitter (±20%)
-      const jitter = (Math.random() * 0.4 - 0.2) * baseDelay;
-      const delay = Math.min(SteroidConnection.MAX_BACKOFF_DELAY_MS, baseDelay + jitter);
+      const delay = calculateBackoff(
+        attempt + 1,
+        1000,
+        SteroidConnection.MAX_BACKOFF_DELAY_MS,
+        SteroidConnection.MAX_BACKOFF_DELAY_MS * SteroidConnection.JITTER_FACTOR
+      );
       
       this.logger.info(`Retrying after ${delay.toFixed(0)}ms due to transient error (with jitter)`);
       await sleep(delay);
@@ -403,7 +406,7 @@ export class SteroidConnection {
       if (!attemptedUrls.has(index)) {
         // Circuit Breaker: check if node is in cooldown or has too many failures
         const isCooldown = health?.lastUnhealthy && (now - health.lastUnhealthy < this.steroidConfig.unhealthyCooldownMs);
-        const isCircuitOpen = (health as any)?.consecutiveFailures >= SteroidConnection.CIRCUIT_BREAKER_THRESHOLD;
+        const isCircuitOpen = (health?.consecutiveFailures ?? 0) >= SteroidConnection.CIRCUIT_BREAKER_THRESHOLD;
         
         if (health?.healthy && !isCooldown && !isCircuitOpen) {
             return index;
@@ -427,8 +430,12 @@ export class SteroidConnection {
     return translatedError;
   }
 
-  private log(level: 'info' | 'warn' | 'error', ...args: any[]): void {
-    this.logger.log(level, ...args);
+  /**
+   * Get the underlying Connection instance for typed access.
+   * Avoids the need for `as any` casts in downstream code.
+   */
+  public getConnection(): Connection {
+    return this.activeConnection;
   }
 
   /**
@@ -461,19 +468,19 @@ export class SteroidConnection {
       this.updateHealthStatus(url, true, latency, slot);
       
       this.emitter?.emit('connection:health', { endpoint: url, healthy: true, latency, slot });
-      this.log('info', `Health check passed for ${url} (Slot: ${slot}, ${latency}ms)`);
+      this.logger.info(`Health check passed for ${url} (Slot: ${slot}, ${latency}ms)`);
     } catch (error: any) {
       this.updateHealthStatus(url, false, undefined, undefined);
       this.scorer?.recordFailure(url);
       this.emitter?.emit('connection:health', { endpoint: url, healthy: false });
-      this.log('warn', `Health check failed for ${url}:`, error.message);
+      this.logger.warn(`Health check failed for ${url}:`, error.message);
     }
   }
 
   private startHealthChecks(): void {
     this.healthCheckTimer = setInterval(() => {
       this.performHealthCheck().catch((err) => {
-        this.log('error', 'Health check error:', err);
+        this.logger.error('Health check error:', err);
       });
     }, this.steroidConfig.healthCheckInterval);
   }

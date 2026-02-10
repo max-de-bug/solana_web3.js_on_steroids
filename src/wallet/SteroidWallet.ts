@@ -12,8 +12,7 @@ import {
   SteroidWalletConfig,
   SteroidSendOptions 
 } from '../types/SteroidWalletTypes.js';
-import { isLegacyTransaction, Logger, normalizeWalletError, getTransactionBlockhash, setTransactionBlockhash } from '../utils/index.js';
-import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { Logger, normalizeWalletError, getTransactionBlockhash, setTransactionBlockhash } from '../utils/index.js';
 import { ClusterDetector } from '../connection/ClusterDetector.js';
 import { SteroidError, ErrorTranslator, ErrorCode, ErrorCategory } from '../errors/index.js';
 import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
@@ -86,7 +85,6 @@ export class SteroidWallet {
   private txEngine: SteroidTransaction;
   private config: Required<SteroidWalletConfig>;
   private logger: Logger;
-  private computeOptimizer: ComputeBudgetOptimizer;
   private emitter?: SteroidEventEmitter;
   private networkValidated: boolean = false;
   private genesisHash?: string;
@@ -101,7 +99,6 @@ export class SteroidWallet {
     this.connection = connection;
     this.emitter = emitter;
     this.txEngine = new SteroidTransaction(connection, emitter);
-    this.computeOptimizer = new ComputeBudgetOptimizer(connection);
     this.config = {
       validateNetwork: config.validateNetwork ?? true,
       expectedGenesisHash: config.expectedGenesisHash ?? '',
@@ -136,24 +133,19 @@ export class SteroidWallet {
         transaction = await this.ensureFreshBlockhash(transaction) as typeof transaction;
       }
 
-      // Apply compute budget optimization if enabled
-      if (options.computeBudget !== false) {
-        const budgetConfig = typeof options.computeBudget === 'object' ? options.computeBudget : {};
-        transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig) as typeof transaction;
-      }
-
       // Sign transaction
-      this.log('info', 'Requesting signature from wallet...');
+      this.logger.info('Requesting signature from wallet...');
       const signedTx = await this.signTransactionSafe(transaction);
-      this.log('info', 'Transaction signed successfully');
+      this.logger.info('Transaction signed successfully');
 
       // Send with Steroid reliability
+      // Note: compute budget is applied by SteroidTransaction.sendAndConfirm()
       return await this.txEngine.sendAndConfirm(signedTx, {
         enableLogging: this.config.enableLogging,
         ...options,
         // Automatic re-signing callback
         onBlockhashRefresh: async (tx) => {
-          this.log('info', 'Re-signing transaction after blockhash refresh...');
+          this.logger.info('Re-signing transaction after blockhash refresh...');
           return await this.signTransactionSafe(tx);
         }
       });
@@ -250,7 +242,7 @@ export class SteroidWallet {
   private async validateNetwork(): Promise<void> {
     try {
       // Get genesis hash and detected cluster to uniquely identify the network
-      const genesisHash = await (this.connection as any).getGenesisHash();
+      const genesisHash = await this.connection.getConnection().getGenesisHash();
       this.genesisHash = genesisHash;
       
       const cluster = ClusterDetector.detectCluster(genesisHash);
@@ -291,7 +283,7 @@ export class SteroidWallet {
 
     if (!existingBlockhash) {
       // No blockhash set, fetch a fresh one
-      const { blockhash, lastValidBlockHeight } = await (this.connection as any).getLatestBlockhash('confirmed');
+      const { blockhash, lastValidBlockHeight } = await this.connection.getConnection().getLatestBlockhash('confirmed');
       const updatedTx = setTransactionBlockhash(transaction, blockhash, lastValidBlockHeight);
       this.logger.info('Set fresh blockhash on transaction');
       return updatedTx as T;
@@ -329,10 +321,6 @@ export class SteroidWallet {
     return new WalletError(type, message, error);
   }
 
-  private log(level: 'info' | 'warn' | 'error', ...args: any[]): void {
-    this.logger.log(level, ...args);
-  }
-
   /**
    * Get network information.
    */
@@ -348,7 +336,7 @@ export class SteroidWallet {
    */
   public invalidateNetwork(): void {
     this.networkValidated = false;
-    this.log('info', 'Network validation invalidated, will re-validate on next operation');
+    this.logger.info('Network validation invalidated, will re-validate on next operation');
   }
 
   /**

@@ -12,6 +12,7 @@ import {
 } from '../types/SteroidWalletTypes.js';
 import { Logger } from '../utils/index.js';
 import { SteroidEventEmitter, SteroidEventMap } from '../events/SteroidEventEmitter.js';
+import { SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
 
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
@@ -162,7 +163,12 @@ export class SteroidClient {
 
   private ensureNotDestroyed(): void {
     if (this.isDestroyed) {
-      throw new Error('[SteroidClient] Cannot execute operation: instance is already destroyed');
+      throw new SteroidError({
+        code: ErrorCode.INTERNAL_ERROR,
+        category: ErrorCategory.SYSTEM,
+        userMessage: 'Client instance is destroyed',
+        suggestion: 'Create a new SteroidClient instance to continue',
+      });
     }
   }
 }

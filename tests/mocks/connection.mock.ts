@@ -33,6 +33,7 @@ export function createMockConnection(overrides: Partial<Connection> = {}): Conne
     ]),
     onSignature: vi.fn().mockReturnValue(123),
     removeSignatureListener: vi.fn().mockReturnValue(true),
+    getConnection: vi.fn().mockImplementation(() => mockConnection),
     ...overrides,
   };
 
@@ -69,6 +70,7 @@ export function createFailingMockConnection(
       value: { confirmationStatus: 'confirmed', err: null },
     }),
     getRecentPrioritizationFees: vi.fn().mockResolvedValue([{ prioritizationFee: 0 }]),
+    getConnection: vi.fn().mockImplementation(function(this: any) { return this; }),
   } as unknown as Connection;
 }
 
@@ -93,6 +95,7 @@ export function createRateLimitedMockConnection(rateLimitUntilAttempt: number): 
       lastValidBlockHeight: 100000,
     }),
     getRecentPrioritizationFees: vi.fn().mockResolvedValue([{ prioritizationFee: 0 }]),
+    getConnection: vi.fn().mockImplementation(function(this: any) { return this; }),
   } as unknown as Connection;
 }
 
@@ -104,6 +107,7 @@ export function createNodeFailureMockConnection(): Connection {
     getSlot: vi.fn().mockRejectedValue(new Error('fetch failed')),
     getLatestBlockhash: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
     sendRawTransaction: vi.fn().mockRejectedValue(new Error('503 Service Unavailable')),
+    getConnection: vi.fn().mockImplementation(function(this: any) { return this; }),
   } as unknown as Connection;
 }
 

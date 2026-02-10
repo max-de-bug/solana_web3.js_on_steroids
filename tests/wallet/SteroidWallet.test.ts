@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Transaction, Keypair, SystemProgram, PublicKey } from '@solana/web3.js';
 import { SteroidWallet, WalletError } from '../../src/wallet/SteroidWallet.js';
 import { SteroidConnection } from '../../src/connection/SteroidConnection.js';
+import { createMockConnection } from '../mocks/connection.mock.js';
 import { WalletInterface, WalletErrorType } from '../../src/types/SteroidWalletTypes.js';
 
 // Create mock wallet
@@ -18,21 +19,9 @@ function createMockWallet(publicKey?: PublicKey): WalletInterface {
 
 // Create mock connection
 function createMockSteroidConnection(): SteroidConnection {
-  return {
-    getLatestBlockhash: vi.fn().mockResolvedValue({
-      blockhash: 'mockBlockhash123456789',
-      lastValidBlockHeight: 100000,
-    }),
-    getGenesisHash: vi.fn().mockResolvedValue('5eykt4UsFv8P8NJdTREpY1vzqBUfSmRciL826HUBRkEA'),
-    simulateTransaction: vi.fn().mockResolvedValue({
-      value: { err: null, logs: [] },
-    }),
-    sendRawTransaction: vi.fn().mockResolvedValue('2z7vAnS1uh1981S88mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X54D2t7S1vC9S2mnyfFp72R1X'),
-    getSignatureStatus: vi.fn().mockResolvedValue({
-      value: { confirmationStatus: 'confirmed', err: null },
-    }),
+  return createMockConnection({
     getEndpoints: vi.fn().mockReturnValue(['https://mock.solana.com']),
-  } as unknown as SteroidConnection;
+  } as any) as unknown as SteroidConnection;
 }
 
 function createTestTransaction(): Transaction {
