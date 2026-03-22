@@ -13,6 +13,7 @@ import {
 import { Logger } from '../utils/index.js';
 import { SteroidEventEmitter, SteroidEventMap } from '../events/SteroidEventEmitter.js';
 import { SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
+import type { Connection } from '@solana/web3.js';
 
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
@@ -24,7 +25,10 @@ import { SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
  * - Production-grade reliability out of the box
  */
 export class SteroidClient {
-  private connection: SteroidConnection;
+  /**
+   * Resilient RPC handle: forwards `Connection` methods via an internal Proxy (see SteroidConnection).
+   */
+  public readonly connection: SteroidConnection & Connection;
   private transactionEngine: SteroidTransaction;
   private config: SteroidClientConfig;
   private logger: Logger;
@@ -57,7 +61,7 @@ export class SteroidClient {
     this.logger = new Logger('SteroidClient', config.enableLogging ?? false);
     this.events = new SteroidEventEmitter();
     
-    this.connection = new SteroidConnection(primary, connectionConfig, this.events);
+    this.connection = new SteroidConnection(primary, connectionConfig, this.events) as SteroidConnection & Connection;
     this.transactionEngine = new SteroidTransaction(this.connection, this.events);
     
     this.logger.info('Initialized with endpoint(s):', endpoint);
@@ -154,10 +158,11 @@ export class SteroidClient {
    */
   public destroy(): void {
     if (this.isDestroyed) return;
-    
+
     this.connection.destroy();
+    this.events.removeAllListeners();
     this.isDestroyed = true;
-    
+
     this.logger.info('Destroyed');
   }
 

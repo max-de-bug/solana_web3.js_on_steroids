@@ -49,6 +49,13 @@ describe('SteroidClient', () => {
       expect(client).toBeDefined();
     });
 
+    it('should expose a Connection-compatible resilient connection', () => {
+      const client = new SteroidClient('https://api.mainnet-beta.solana.com');
+
+      expect(client.connection).toBeDefined();
+      expect(client.connection.getActiveEndpoint()).toBe('https://api.mainnet-beta.solana.com');
+    });
+
     it('should create a client with multiple endpoints (array)', () => {
       const client = new SteroidClient([
         'https://primary.solana.com',

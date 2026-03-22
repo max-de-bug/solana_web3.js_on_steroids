@@ -82,14 +82,14 @@ npm install solana-web3-on-steroids
 import { SteroidClient } from 'solana-web3-on-steroids';
 
 const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
-  fallbacks: ['https://solana-mainnet.rpc.extrnode.com'],
   connection: {
-    latencyScoring: true, // Auto-pick fastest node
-    raceNodes: 2,         // Race top 2 nodes on failure
-    maxSlotLag: 50,       // Penalize nodes lagging by >50 slots
-    expectedCluster: 'mainnet-beta' 
+    fallbacks: ['https://solana-mainnet.rpc.extrnode.com'],
+    latencyScoring: true,
+    raceNodes: 2,
+    maxSlotLag: 50,
+    expectedCluster: 'mainnet-beta',
   },
-  enableLogging: true
+  enableLogging: true,
 });
 
 // Use it exactly like a standard @solana/web3.js Connection

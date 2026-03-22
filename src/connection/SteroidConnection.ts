@@ -297,10 +297,15 @@ export class SteroidConnection {
       this.logger.error(`Node failure detected during ${methodName} at ${this.getActiveEndpoint()}:`, error.message);
       this.updateHealthStatus(this.urls[this.currentUrlIndex], false, undefined, undefined);
 
-      if (this.urls.length > 1 && attemptedUrls.size < this.urls.length) {
-        await this.switchToNextRpc(attemptedUrls);
-        return true;
+      if (this.urls.length <= 1) {
+        return false;
       }
+      attemptedUrls.add(this.currentUrlIndex);
+      if (attemptedUrls.size >= this.urls.length) {
+        return false;
+      }
+      await this.switchToNextRpc(attemptedUrls);
+      return true;
     }
 
     return false;
