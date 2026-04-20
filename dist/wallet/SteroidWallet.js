@@ -1,14 +1,53 @@
 import { SteroidTransaction } from '../transaction/SteroidTransaction.js';
 import { WalletErrorType } from '../types/SteroidWalletTypes.js';
-import { isLegacyTransaction, Logger, normalizeWalletError } from '../utils/index.js';
-export class WalletError extends Error {
+import { Logger, normalizeWalletError, getTransactionBlockhash, setTransactionBlockhash } from '../utils/index.js';
+import { ClusterDetector } from '../connection/ClusterDetector.js';
+import { SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
+/**
+ * Wallet-specific error that extends SteroidError for unified error handling.
+ */
+export class WalletError extends SteroidError {
     type;
-    originalError;
     constructor(type, message, originalError) {
-        super(message);
+        // Map WalletErrorType to ErrorCode
+        const code = WalletError.mapTypeToCode(type);
+        super({
+            code,
+            category: ErrorCategory.WALLET,
+            userMessage: message,
+            suggestion: WalletError.getSuggestionForType(type),
+            originalError,
+        });
         this.type = type;
-        this.originalError = originalError;
         this.name = 'WalletError';
+    }
+    static mapTypeToCode(type) {
+        switch (type) {
+            case WalletErrorType.USER_REJECTED:
+                return ErrorCode.USER_REJECTED;
+            case WalletErrorType.NOT_CONNECTED:
+                return ErrorCode.NOT_CONNECTED;
+            case WalletErrorType.NETWORK_MISMATCH:
+                return ErrorCode.NETWORK_MISMATCH;
+            case WalletErrorType.UNSUPPORTED_OPERATION:
+                return ErrorCode.UNSUPPORTED_OPERATION;
+            default:
+                return ErrorCode.UNKNOWN;
+        }
+    }
+    static getSuggestionForType(type) {
+        switch (type) {
+            case WalletErrorType.USER_REJECTED:
+                return 'Click approve in your wallet to confirm the transaction';
+            case WalletErrorType.NOT_CONNECTED:
+                return 'Connect your wallet to continue';
+            case WalletErrorType.NETWORK_MISMATCH:
+                return 'Switch to the correct network in your wallet';
+            case WalletErrorType.UNSUPPORTED_OPERATION:
+                return 'This wallet does not support the requested operation';
+            default:
+                return 'Please try again or use a different wallet';
+        }
     }
 }
 /**
@@ -24,12 +63,14 @@ export class SteroidWallet {
     txEngine;
     config;
     logger;
+    emitter;
     networkValidated = false;
     genesisHash;
-    constructor(wallet, connection, config = {}) {
+    constructor(wallet, connection, config = {}, emitter) {
         this.wallet = wallet;
         this.connection = connection;
-        this.txEngine = new SteroidTransaction(connection);
+        this.emitter = emitter;
+        this.txEngine = new SteroidTransaction(connection, emitter);
         this.config = {
             validateNetwork: config.validateNetwork ?? true,
             expectedGenesisHash: config.expectedGenesisHash ?? '',
@@ -54,17 +95,23 @@ export class SteroidWallet {
         await this.guardState();
         try {
             // Refresh blockhash if needed
-            if (this.config.autoRefreshBlockhash && isLegacyTransaction(transaction)) {
-                await this.ensureFreshBlockhash(transaction);
+            if (this.config.autoRefreshBlockhash) {
+                transaction = await this.ensureFreshBlockhash(transaction);
             }
             // Sign transaction
-            this.log('info', 'Requesting signature from wallet...');
+            this.logger.info('Requesting signature from wallet...');
             const signedTx = await this.signTransactionSafe(transaction);
-            this.log('info', 'Transaction signed successfully');
+            this.logger.info('Transaction signed successfully');
             // Send with Steroid reliability
+            // Note: compute budget is applied by SteroidTransaction.sendAndConfirm()
             return await this.txEngine.sendAndConfirm(signedTx, {
                 enableLogging: this.config.enableLogging,
                 ...options,
+                // Automatic re-signing callback
+                onBlockhashRefresh: async (tx) => {
+                    this.logger.info('Re-signing transaction after blockhash refresh...');
+                    return await this.signTransactionSafe(tx);
+                }
             });
         }
         catch (error) {
@@ -141,14 +188,18 @@ export class SteroidWallet {
      */
     async validateNetwork() {
         try {
-            // Get genesis hash to uniquely identify the network
-            const genesisHash = await this.connection.getGenesisHash();
+            // Get genesis hash and detected cluster to uniquely identify the network
+            const genesisHash = await this.connection.getConnection().getGenesisHash();
             this.genesisHash = genesisHash;
-            this.logger.info(`Network validation - Genesis hash: ${genesisHash.slice(0, 16)}...`);
+            const cluster = ClusterDetector.detectCluster(genesisHash);
+            const clusterName = ClusterDetector.getClusterName(cluster);
+            this.logger.info(`Network validation - Cluster: ${clusterName}, Genesis hash: ${genesisHash.slice(0, 16)}...`);
             // If expected genesis hash is configured, verify it matches
             if (this.config.expectedGenesisHash) {
                 if (genesisHash !== this.config.expectedGenesisHash) {
-                    throw new WalletError(WalletErrorType.NETWORK_MISMATCH, `Network mismatch: Expected ${this.config.expectedGenesisHash.slice(0, 16)}..., got ${genesisHash.slice(0, 16)}...`);
+                    const expectedCluster = ClusterDetector.detectCluster(this.config.expectedGenesisHash);
+                    const expectedName = ClusterDetector.getClusterName(expectedCluster);
+                    throw new WalletError(WalletErrorType.NETWORK_MISMATCH, `Network mismatch: Expected ${expectedName} (${this.config.expectedGenesisHash.slice(0, 8)}...), got ${clusterName} (${genesisHash.slice(0, 8)}...)`);
                 }
                 this.logger.info('Network validation passed - Genesis hash matches expected value');
             }
@@ -167,18 +218,19 @@ export class SteroidWallet {
      * Ensures transaction has a fresh blockhash.
      */
     async ensureFreshBlockhash(transaction) {
-        if (!transaction.recentBlockhash) {
+        const existingBlockhash = getTransactionBlockhash(transaction);
+        if (!existingBlockhash) {
             // No blockhash set, fetch a fresh one
-            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
-            transaction.recentBlockhash = blockhash;
-            transaction.lastValidBlockHeight = lastValidBlockHeight;
+            const { blockhash, lastValidBlockHeight } = await this.connection.getConnection().getLatestBlockhash('confirmed');
+            const updatedTx = setTransactionBlockhash(transaction, blockhash, lastValidBlockHeight);
             this.logger.info('Set fresh blockhash on transaction');
-            return;
+            return updatedTx;
         }
         // Check if existing blockhash might be stale
         // Note: This is a best-effort check - we can't know the exact age
         // The transaction layer will refresh if needed during retry
         this.logger.info('Transaction already has blockhash, will validate during send');
+        return transaction;
     }
     /**
      * Safely sign a transaction with proper error handling.
@@ -201,9 +253,6 @@ export class SteroidWallet {
         const { type, message } = normalizeWalletError(error);
         return new WalletError(type, message, error);
     }
-    log(level, ...args) {
-        this.logger.log(level, ...args);
-    }
     /**
      * Get network information.
      */
@@ -218,7 +267,7 @@ export class SteroidWallet {
      */
     invalidateNetwork() {
         this.networkValidated = false;
-        this.log('info', 'Network validation invalidated, will re-validate on next operation');
+        this.logger.info('Network validation invalidated, will re-validate on next operation');
     }
     /**
      * Check if wallet supports message signing.

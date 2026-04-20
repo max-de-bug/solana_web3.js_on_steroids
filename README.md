@@ -1,10 +1,10 @@
-# Solana web3.js on Steroids ⚙️🧱
+# Solana Resilience ⚙️🧱
 
 **A systems-grade resilience layer for `@solana/web3.js`**
 
-Solana UX today is fragile: wallet adapters leak abstractions, RPC behavior is inconsistent, and many integrations fall short of production-grade reliability. **Solana on Steroids** treats crypto UX correctness as a systems problem, making network instability and RPC variability invisible to your users.
+Solana UX today is fragile: wallet adapters leak abstractions, RPC behavior is inconsistent, and many integrations fall short of production-grade reliability. **Solana Resilience** treats crypto UX correctness as a systems problem, making network instability and RPC variability invisible to your users.
 
-[![NPM Version](https://img.shields.io/npm/v/solana-web3-on-steroids)](https://www.npmjs.com/package/solana-web3-on-steroids)
+[![NPM Version](https://img.shields.io/npm/v/solana-resilience)](https://www.npmjs.com/package/solana-resilience)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/%3C%2F%3E-TypeScript-%23007acc)](https://www.typescriptlang.org/)
 
@@ -73,13 +73,13 @@ The engine handles the entire lifecycle:
 ## 📦 Installation
 
 ```bash
-npm install solana-web3-on-steroids
+npm install solana-resilience
 ```
 
 ## 🛠 Quick Start
 
 ```typescript
-import { SteroidClient } from 'solana-web3-on-steroids';
+import { SteroidClient } from 'solana-resilience';
 
 const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
   connection: {

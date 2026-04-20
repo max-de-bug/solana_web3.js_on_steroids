@@ -1,23 +1,51 @@
-import type { Connection, ConnectionConfig, Commitment, PublicKey, Transaction, VersionedTransaction, TransactionSignature, SendOptions, BlockhashWithExpiryBlockHeight, SignatureStatus } from '@solana/web3.js';
-export type { Connection, ConnectionConfig, Commitment, PublicKey, Transaction, VersionedTransaction, TransactionSignature, SendOptions, BlockhashWithExpiryBlockHeight, SignatureStatus, };
+import type { ConnectionConfig, Commitment, PublicKey, Transaction, VersionedTransaction, TransactionSignature, SendOptions } from '@solana/web3.js';
+export type { ConnectionConfig, Commitment, PublicKey, Transaction, VersionedTransaction, TransactionSignature, SendOptions, };
+/**
+ * Configuration for SteroidConnection resilience behaviour.
+ */
 export interface SteroidConnectionConfig extends ConnectionConfig {
+    /** Additional RPC endpoint URLs to use as fallbacks */
     fallbacks?: string[];
+    /** Maximum retry attempts per request (default: 5) */
     maxRetries?: number;
+    /** Base delay between retries in ms (default: 500) */
     retryDelay?: number;
+    /** Interval between background health checks in ms (default: 30000). 0 = disabled */
     healthCheckInterval?: number;
+    /** Per-request timeout in ms (default: 30000) */
     requestTimeout?: number;
+    /** Enable internal diagnostic logging (default: false) */
     enableLogging?: boolean;
+    /** Enable performance-based RPC selection via EMA latency scoring (default: false) */
+    latencyScoring?: boolean;
+    /** Number of recent requests to consider for scoring (default: 20) */
+    scoringWindow?: number;
+    /** Expected cluster for validation. Emits warning on mismatch */
+    expectedCluster?: ClusterType;
+    /** Number of nodes to race for critical requests (default: 0 = disabled) */
+    raceNodes?: number;
+    /** Maximum allowed slot lag before a node is penalised (default: 50) */
+    maxSlotLag?: number;
+    /** Cooldown period after a node is marked unhealthy in ms (default: 60000) */
+    unhealthyCooldownMs?: number;
 }
 export interface RPCHealth {
     url: string;
     healthy: boolean;
     lastChecked: number;
     latency?: number;
+    score?: number;
+    lastSlot?: number;
+    lastUnhealthy?: number;
+    /** Number of consecutive failures for circuit breaker logic */
+    consecutiveFailures?: number;
 }
 export interface FailoverStats {
     count: number;
     lastTime: number;
 }
+import type { ComputeBudgetConfig } from '../compute/ComputeBudgetOptimizer.js';
+export type { ComputeBudgetConfig };
 export interface SteroidSendOptions extends SendOptions {
     timeoutSeconds?: number;
     retryInterval?: number;
@@ -25,6 +53,25 @@ export interface SteroidSendOptions extends SendOptions {
     maxBlockhashAge?: number;
     enableLogging?: boolean;
     confirmationNodes?: number;
+    /**
+     * Optional AbortSignal to cancel the transaction.
+     * When aborted, throws SteroidError with code ABORTED.
+     */
+    abortSignal?: AbortSignal;
+    /**
+     * Compute budget optimization config.
+     * - true: Enable with defaults
+     * - false: Disable
+     * - ComputeBudgetConfig: Custom configuration
+     */
+    computeBudget?: boolean | ComputeBudgetConfig;
+    /**
+     * Optional callback to re-sign transaction after blockhash refresh.
+     * If provided, SteroidTransaction will call this when blockhash is updated.
+     */
+    onBlockhashRefresh?: (transaction: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>;
+    /** Use WebSocket for confirmation (default: true). Falls back to HTTP polling. */
+    useWebSocket?: boolean;
 }
 export declare enum TransactionState {
     PENDING = "PENDING",
@@ -34,7 +81,8 @@ export declare enum TransactionState {
     CONFIRMED = "CONFIRMED",
     FINALIZED = "FINALIZED",
     FAILED = "FAILED",
-    EXPIRED = "EXPIRED"
+    EXPIRED = "EXPIRED",
+    ABORTED = "ABORTED"
 }
 export interface TransactionStateInfo {
     state: TransactionState;
@@ -83,11 +131,12 @@ export interface ClientStats {
     allEndpoints: string[];
     failoverStats: FailoverStats;
     healthStatus: RPCHealth[];
+    detectedCluster: ClusterType;
 }
 /**
  * Network Types
  */
-export type NetworkType = 'mainnet-beta' | 'devnet' | 'testnet';
+export type ClusterType = 'mainnet-beta' | 'devnet' | 'testnet' | 'localnet' | 'unknown';
 /**
  * Utility Types
  */
@@ -109,39 +158,6 @@ export type DeepPartial<T> = {
     [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
 };
 /**
- * Event types for potential event emitter implementation
- */
-export interface SteroidEvents {
-    'transaction:pending': {
-        signature?: string;
-    };
-    'transaction:simulated': {
-        signature?: string;
-    };
-    'transaction:sent': {
-        signature: string;
-    };
-    'transaction:confirmed': {
-        signature: string;
-        attempts: number;
-    };
-    'transaction:failed': {
-        signature?: string;
-        error: Error;
-    };
-    'connection:failover': {
-        from: string;
-        to: string;
-    };
-    'connection:health-check': {
-        health: RPCHealth[];
-    };
-    'wallet:connected': {
-        publicKey: PublicKey;
-    };
-    'wallet:disconnected': {};
-}
-/**
  * Constants
  */
 export declare const DEFAULT_CONFIG: {
@@ -151,6 +167,11 @@ export declare const DEFAULT_CONFIG: {
         readonly healthCheckInterval: 30000;
         readonly requestTimeout: 30000;
         readonly enableLogging: false;
+        readonly latencyScoring: false;
+        readonly scoringWindow: 20;
+        readonly raceNodes: 0;
+        readonly maxSlotLag: 50;
+        readonly unhealthyCooldownMs: 60000;
     };
     readonly TRANSACTION: {
         readonly timeoutSeconds: 60;
@@ -167,14 +188,3 @@ export declare const DEFAULT_CONFIG: {
         readonly maxBlockhashAge: 60;
     };
 };
-/**
- * Export type for package consumers
- */
-export interface SteroidWalletPackage {
-    SteroidClient: any;
-    SteroidConnection: any;
-    SteroidTransaction: any;
-    SteroidWallet: any;
-    WalletError: any;
-    createSteroidClient: any;
-}

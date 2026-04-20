@@ -1,16 +1,25 @@
 import { Connection, } from '@solana/web3.js';
 import { TransactionState, DEFAULT_CONFIG } from '../types/SteroidWalletTypes.js';
-import { isLegacyTransaction, sleep, Logger, parseSimulationError, isBlockhashExpiredError, serializeTransaction, generateId, clearExpiredEntries } from '../utils/index.js';
+import { isLegacyTransaction, sleep, Logger, parseSimulationError, isBlockhashExpiredError, serializeTransaction, generateId, clearExpiredEntries, setTransactionBlockhash, isTransactionSigned } from '../utils/index.js';
+import { ComputeBudgetOptimizer } from '../compute/ComputeBudgetOptimizer.js';
+import { WebSocketConfirmation } from '../connection/WebSocketConfirmation.js';
+import { ErrorTranslator, SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
+import bs58 from 'bs58';
 /**
  * Enhanced transaction handling with state management, automatic retries,
  * blockhash refresh, and multi-node confirmation.
  */
 export class SteroidTransaction {
+    static DEFAULT_STATE_TTL_MS = 3_600_000; // 1 hour
     connection;
     transactionStates = new Map();
     logger;
-    constructor(connection) {
+    emitter;
+    computeOptimizer;
+    constructor(connection, emitter) {
         this.connection = connection;
+        this.emitter = emitter;
+        this.computeOptimizer = new ComputeBudgetOptimizer(connection);
         this.logger = new Logger('SteroidTransaction', false);
     }
     /**
@@ -24,7 +33,7 @@ export class SteroidTransaction {
             ...DEFAULT_CONFIG.TRANSACTION,
             ...options,
         };
-        const { timeoutSeconds, retryInterval, skipPreflight, preflightCommitment, confirmationCommitment, maxBlockhashAge, enableLogging, confirmationNodes, } = mergedOptions;
+        const { timeoutSeconds, retryInterval, skipPreflight, preflightCommitment, confirmationCommitment, maxBlockhashAge, enableLogging, confirmationNodes, abortSignal, } = mergedOptions;
         const executionTimeout = timeoutSeconds * 1000;
         // Update logger preference for this call
         this.logger.setEnabled(enableLogging || false);
@@ -35,69 +44,153 @@ export class SteroidTransaction {
             startTime: Date.now(),
         };
         this.transactionStates.set(stateId, state);
+        this.emitter?.emit('transaction:pending', { stateId });
         try {
+            // Check for abort before starting
+            this.checkAbortSignal(abortSignal, stateId, state);
+            // 0. Apply compute budget optimization if enabled
+            let computeUnitsEstimated;
+            const isSigned = isLegacyTransaction(transaction)
+                ? transaction.signatures.some(s => s.signature !== null)
+                : transaction.signatures.length > 0;
+            if (mergedOptions.computeBudget !== false && !isSigned) {
+                const budgetConfig = typeof mergedOptions.computeBudget === 'object'
+                    ? mergedOptions.computeBudget
+                    : {};
+                // applyComputeBudget internally estimates, avoiding a redundant simulation RPC call
+                transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
+                computeUnitsEstimated = this.computeOptimizer.lastEstimate?.computeUnits;
+            }
             // 1. Simulation with detailed error parsing
             if (!skipPreflight) {
                 this.updateState(stateId, TransactionState.PENDING);
                 await this.simulateTransaction(transaction, preflightCommitment);
                 this.updateState(stateId, TransactionState.SIMULATED);
+                this.emitter?.emit('transaction:simulated', { stateId, computeUnits: computeUnitsEstimated });
             }
-            // 2. Initial blockhash setup if needed
-            let blockhashContext;
-            if (isLegacyTransaction(transaction)) {
-                blockhashContext = await this.getFreshBlockhash();
-                transaction.recentBlockhash = blockhashContext.blockhash;
-                transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
-            }
+            // 2. Initial blockhash setup
+            let blockhashContext = await this.getFreshBlockhash();
+            transaction = setTransactionBlockhash(transaction, blockhashContext.blockhash, blockhashContext.lastValidBlockHeight);
             const startTime = Date.now();
             let signature = '';
             let lastBlockhashRefresh = Date.now();
             let attempts = 0;
             // 3. Send and retry loop with blockhash refresh
             while (Date.now() - startTime < executionTimeout) {
+                let wsWaitStart = 0;
                 try {
                     attempts++;
                     state.attempts = attempts; // Update state attempts
                     state.lastAttemptTime = Date.now();
+                    // Check for abort at start of each iteration
+                    this.checkAbortSignal(abortSignal, stateId, state);
                     // Check if blockhash is too old and refresh if needed
                     const ageSeconds = (Date.now() - lastBlockhashRefresh) / 1000;
-                    if (ageSeconds > maxBlockhashAge && isLegacyTransaction(transaction)) {
+                    if (ageSeconds > maxBlockhashAge) {
                         this.logger.info(`Blockhash age ${ageSeconds.toFixed(1)}s exceeds max ${maxBlockhashAge}s, refreshing...`);
                         blockhashContext = await this.getFreshBlockhash();
-                        transaction.recentBlockhash = blockhashContext.blockhash;
-                        transaction.lastValidBlockHeight = blockhashContext.lastValidBlockHeight;
-                        // Re-serialize with new blockhash
-                        // Note: This assumes the transaction is re-signed by the caller if needed
+                        // Update blockhash for both Legacy and Versioned transactions
+                        transaction = setTransactionBlockhash(transaction, blockhashContext.blockhash, blockhashContext.lastValidBlockHeight);
                         lastBlockhashRefresh = Date.now();
+                        // Re-sign transaction if callback provided
+                        if (mergedOptions.onBlockhashRefresh) {
+                            this.logger.info('Requesting re-signature after blockhash refresh...');
+                            transaction = await mergedOptions.onBlockhashRefresh(transaction);
+                            this.logger.info('Transaction re-signed successfully');
+                        }
+                        else if (isTransactionSigned(transaction)) {
+                            this.logger.warn('Blockhash refreshed but no onBlockhashRefresh callback provided. Transaction signature might be invalid.');
+                        }
                     }
                     // Broadcast transaction
                     this.logger.info(`Sending transaction (Attempt ${attempts})...`);
                     try {
                         const rawTransaction = serializeTransaction(transaction);
-                        signature = await this.connection.sendRawTransaction(rawTransaction, {
+                        signature = await this.connection.getConnection().sendRawTransaction(rawTransaction, {
                             skipPreflight: true,
                             maxRetries: 0, // We handle retries ourselves
                         });
-                        this.logger.info(`Transaction sent: ${signature}`);
                     }
                     catch (sendError) {
+                        const errorMsg = sendError.message || '';
                         if (isBlockhashExpiredError(sendError)) {
                             this.logger.warn('Blockhash expired during send, refreshing...');
                             lastBlockhashRefresh = 0; // Force refresh on next iteration
-                            continue; // Skip to next iteration to refresh blockhash
+                            continue;
                         }
-                        throw sendError; // Re-throw other errors
+                        // Handle "Already processed" - often happens if a previous node got it but we didn't confirm yet
+                        if (errorMsg.includes('already processed') || errorMsg.includes('0x0')) {
+                            this.logger.info('Transaction already processed or exists on some nodes, waiting for confirmation...');
+                            // Extract signature from transaction to ensure we can poll for it
+                            if (!signature) {
+                                try {
+                                    if (isLegacyTransaction(transaction)) {
+                                        // Use the first signature if it exists
+                                        if (transaction.signature) {
+                                            signature = bs58.encode(transaction.signature);
+                                        }
+                                    }
+                                    else {
+                                        const vTx = transaction;
+                                        if (vTx.signatures.length > 0) {
+                                            signature = bs58.encode(vTx.signatures[0]);
+                                        }
+                                    }
+                                }
+                                catch (sigError) {
+                                    this.logger.warn('Failed to extract signature for already-processed transaction');
+                                }
+                            }
+                        }
+                        else {
+                            throw sendError;
+                        }
                     }
                     this.updateState(stateId, TransactionState.SENT, signature);
+                    this.emitter?.emit('transaction:sent', { stateId, signature, attempt: attempts });
                     this.logger.info(`Transaction sent: ${signature} (attempt ${state.attempts})`);
                     // 4. Multi-node confirmation check
-                    this.logger.info(`Polling for confirmation on ${confirmationNodes} nodes...`);
-                    const confirmed = await this.pollForConfirmation(signature, confirmationCommitment, confirmationNodes);
+                    const useWebSocket = mergedOptions.useWebSocket !== false;
+                    let confirmed = false;
+                    if (useWebSocket) {
+                        wsWaitStart = Date.now();
+                        this.logger.info(`Attempting WebSocket confirmation for ${signature}...`);
+                        const wsResult = await WebSocketConfirmation.confirmSignature(this.connection, signature, confirmationCommitment, retryInterval // Use retryInterval as the WS wait time before falling back or retrying
+                        );
+                        if (wsResult === 'confirmed') {
+                            confirmed = true;
+                            this.logger.info(`Transaction confirmed via WebSocket: ${signature}`);
+                        }
+                        else if (wsResult === 'error') {
+                            // Transaction landed on-chain but failed — no point retrying
+                            this.logger.error(`Transaction failed on-chain (WebSocket): ${signature}`);
+                            throw new SteroidError({
+                                code: ErrorCode.SIMULATION_FAILED,
+                                category: ErrorCategory.TRANSACTION,
+                                userMessage: 'Transaction failed on-chain',
+                                suggestion: 'Check your balances and transaction parameters, then try again',
+                                context: { signature },
+                            });
+                        }
+                        else {
+                            this.logger.warn(`WebSocket confirmation timed out for ${signature}, falling back to multi-node polling...`);
+                        }
+                    }
+                    if (!confirmed) {
+                        this.logger.info(`Polling for confirmation on ${confirmationNodes} nodes...`);
+                        confirmed = await this.pollForConfirmation(signature, confirmationCommitment, confirmationNodes);
+                    }
                     if (confirmed) {
                         this.updateState(stateId, TransactionState.CONFIRMED, signature);
                         state.confirmedAt = Date.now();
-                        const duration = ((state.confirmedAt - state.startTime) / 1000).toFixed(2);
-                        this.logger.info(`Transaction confirmed in ${duration}s after ${state.attempts} attempts`);
+                        const durationMs = state.confirmedAt - state.startTime;
+                        this.emitter?.emit('transaction:confirmed', {
+                            stateId,
+                            signature,
+                            attempts: state.attempts,
+                            durationMs
+                        });
+                        this.logger.info(`Transaction confirmed in ${(durationMs / 1000).toFixed(2)}s after ${state.attempts} attempts`);
                         return signature;
                     }
                     this.logger.warn(`Transaction not yet confirmed, will retry in ${retryInterval}ms...`);
@@ -112,17 +205,35 @@ export class SteroidTransaction {
                         this.logger.warn(`Broadcast attempt failed: ${error.message}`);
                     }
                 }
-                await sleep(retryInterval);
+                // Optimized sleep: If we already waited for WS confirmation, don't sleep again
+                const alreadyWaited = wsWaitStart > 0 ? (Date.now() - wsWaitStart) : 0;
+                const remainingSleep = Math.max(0, retryInterval - alreadyWaited);
+                if (remainingSleep > 0) {
+                    await sleep(remainingSleep);
+                }
+                // Check for abort after sleep
+                this.checkAbortSignal(abortSignal, stateId, state);
             }
             // Timeout reached
             const errorMsg = `Transaction not confirmed within ${timeoutSeconds}s after ${state.attempts} attempts`;
             this.updateState(stateId, TransactionState.EXPIRED, signature, errorMsg);
-            throw new Error(`[SteroidTransaction] ${errorMsg}. Last signature: ${signature || 'none'}`);
+            this.emitter?.emit('transaction:expired', { stateId, signature: signature || undefined, attempts: state.attempts });
+            throw new SteroidError({
+                code: ErrorCode.TRANSACTION_TIMEOUT,
+                category: ErrorCategory.TRANSACTION,
+                userMessage: 'Transaction timed out',
+                suggestion: 'Network is congested. Try again with higher priority fee',
+                context: { signature: signature || undefined, attempts: state.attempts, timeoutSeconds },
+            });
         }
         catch (error) {
-            this.logger.error('Transaction failed:', error.message);
-            this.updateState(stateId, TransactionState.FAILED, state.signature, error.message);
-            throw error;
+            const translatedError = SteroidError.isSteroidError(error)
+                ? error
+                : ErrorTranslator.translate(error, { stateId, attempts: state.attempts });
+            this.logger.error('Transaction failed:', translatedError.userMessage);
+            this.updateState(stateId, TransactionState.FAILED, state.signature, translatedError.userMessage);
+            this.emitter?.emit('transaction:failed', { stateId, error: translatedError, attempts: state.attempts });
+            throw translatedError;
         }
         finally {
             this.logger.setEnabled(false); // Reset logger state
@@ -134,23 +245,36 @@ export class SteroidTransaction {
     async simulateTransaction(transaction, commitment) {
         try {
             this.logger.info('Simulating transaction...');
-            const simulation = await this.connection.simulateTransaction(transaction, {
-                commitment,
-                replaceRecentBlockhash: true,
+            // Multi-node simulation to detect state lag/inconsistency
+            const endpoints = this.connection.getEndpoints().slice(0, 2); // Sim on up to 2 nodes
+            const simPromises = endpoints.map(async (url) => {
+                const conn = new Connection(url);
+                return conn.simulateTransaction(transaction, { commitment, replaceRecentBlockhash: true });
             });
-            if (simulation.value.err) {
-                const errorDetails = parseSimulationError(simulation.value);
-                this.logger.error(`Simulation failed: ${errorDetails}`);
-                throw new Error(`[SteroidTransaction] Simulation failed: ${errorDetails}`);
+            const results = await Promise.allSettled(simPromises);
+            const successfulSim = results.find(r => r.status === 'fulfilled' && !r.value.value.err);
+            if (!successfulSim) {
+                // Find the first error if all failed
+                const errorResult = results.find(r => r.status === 'fulfilled' && r.value.value.err);
+                if (errorResult) {
+                    const errorDetails = parseSimulationError(errorResult.value.value);
+                    this.logger.error(`Simulation failed on all nodes: ${errorDetails}`);
+                    throw ErrorTranslator.simulationFailed(errorDetails);
+                }
+                // If actually rejected (network error)
+                const rejected = results.find(r => r.status === 'rejected');
+                throw rejected ? rejected.reason : new Error('Simulation failed on all nodes');
             }
-            if (simulation.value.logs) {
-                this.logger.info(`Simulation succeeded. Logs count: ${simulation.value.logs.length}`);
+            this.logger.info(`Simulation succeeded on at least one node.`);
+            if (successfulSim.value.value.logs) {
+                this.logger.info(`Simulation logs count: ${successfulSim.value.value.logs.length}`);
             }
         }
         catch (error) {
-            if (error.message?.includes('Simulation failed'))
+            // Re-throw SteroidError as-is (already translated)
+            if (SteroidError.isSteroidError(error))
                 throw error;
-            throw new Error(`[SteroidTransaction] Simulation error: ${error.message}`);
+            throw ErrorTranslator.translate(error, { component: 'simulateTransaction' });
         }
     }
     /**
@@ -195,12 +319,18 @@ export class SteroidTransaction {
     async getFreshBlockhash() {
         try {
             this.logger.info('Fetching fresh blockhash...');
-            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
+            const { blockhash, lastValidBlockHeight } = await this.connection.getConnection().getLatestBlockhash('confirmed');
             this.logger.info(`Fetched fresh blockhash: ${blockhash.slice(0, 8)}...`);
             return { blockhash, lastValidBlockHeight };
         }
         catch (error) {
-            throw new Error(`[SteroidTransaction] Failed to get blockhash: ${error.message}`);
+            throw new SteroidError({
+                code: ErrorCode.CONNECTION_FAILED,
+                category: ErrorCategory.NETWORK,
+                userMessage: 'Failed to get blockhash',
+                suggestion: 'Check your connection and try again',
+                originalError: error,
+            });
         }
     }
     updateState(stateId, state, signature, error) {
@@ -211,6 +341,27 @@ export class SteroidTransaction {
                 existing.signature = signature;
             if (error)
                 existing.error = error;
+        }
+    }
+    /**
+     * Checks if the abort signal has been triggered and throws if so.
+     * @throws SteroidError with code ABORTED if signal is aborted
+     */
+    checkAbortSignal(signal, stateId, state) {
+        if (signal?.aborted) {
+            const abortReason = signal.reason instanceof Error
+                ? signal.reason.message
+                : String(signal.reason || 'Operation aborted by user');
+            this.updateState(stateId, TransactionState.ABORTED, state.signature, abortReason);
+            this.emitter?.emit('transaction:aborted', { stateId, signature: state.signature });
+            this.logger.info(`Transaction aborted: ${abortReason}`);
+            throw new SteroidError({
+                code: ErrorCode.ABORTED,
+                category: ErrorCategory.TRANSACTION,
+                userMessage: 'Transaction cancelled',
+                suggestion: 'The transaction was cancelled by the user or application',
+                context: { stateId, signature: state.signature, reason: abortReason },
+            });
         }
     }
     /**
@@ -228,7 +379,7 @@ export class SteroidTransaction {
     /**
      * Clear old transaction states (cleanup).
      */
-    clearOldStates(olderThanMs = 3600000) {
+    clearOldStates(olderThanMs = SteroidTransaction.DEFAULT_STATE_TTL_MS) {
         clearExpiredEntries(this.transactionStates, olderThanMs);
     }
 }

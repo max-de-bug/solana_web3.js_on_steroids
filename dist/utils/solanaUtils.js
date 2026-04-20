@@ -1,4 +1,4 @@
-import { TransactionExpiredBlockheightExceededError } from '@solana/web3.js';
+import { VersionedTransaction, TransactionExpiredBlockheightExceededError, MessageV0 } from '@solana/web3.js';
 /**
  * Type guard for legacy transactions.
  */
@@ -46,5 +46,59 @@ export function serializeTransaction(transaction) {
         return transaction.serialize();
     }
     return Buffer.from(transaction.serialize());
+}
+/**
+ * Get blockhash from either Legacy or Versioned transaction.
+ */
+export function getTransactionBlockhash(transaction) {
+    if (isLegacyTransaction(transaction)) {
+        return transaction.recentBlockhash;
+    }
+    // For VersionedTransaction, blockhash is in the message
+    return transaction.message.recentBlockhash;
+}
+/**
+ * Set blockhash on either Legacy or Versioned transaction.
+ * For Versioned transactions, creates a new transaction with updated message.
+ */
+export function setTransactionBlockhash(transaction, blockhash, lastValidBlockHeight) {
+    if (isLegacyTransaction(transaction)) {
+        transaction.recentBlockhash = blockhash;
+        if (lastValidBlockHeight !== undefined) {
+            transaction.lastValidBlockHeight = lastValidBlockHeight;
+        }
+        return transaction;
+    }
+    // For VersionedTransaction, create a new MessageV0 with updated blockhash
+    const oldMessage = transaction.message;
+    const newMessage = new MessageV0({
+        header: oldMessage.header,
+        staticAccountKeys: oldMessage.staticAccountKeys,
+        recentBlockhash: blockhash,
+        compiledInstructions: oldMessage.compiledInstructions,
+        addressTableLookups: oldMessage.addressTableLookups,
+    });
+    return new VersionedTransaction(newMessage);
+}
+/**
+ * Check if a transaction has been signed.
+ */
+export function isTransactionSigned(transaction) {
+    if (isLegacyTransaction(transaction)) {
+        return transaction.signatures.some(sig => sig.signature !== null);
+    }
+    // For versioned, check if there's any non-zero signature
+    return transaction.signatures.length > 0 &&
+        transaction.signatures.some(sig => sig.some(byte => byte !== 0));
+}
+/**
+ * Get last valid block height from transaction if available.
+ */
+export function getLastValidBlockHeight(transaction) {
+    if (isLegacyTransaction(transaction)) {
+        return transaction.lastValidBlockHeight;
+    }
+    // VersionedTransaction doesn't store lastValidBlockHeight directly
+    return undefined;
 }
 //# sourceMappingURL=solanaUtils.js.map

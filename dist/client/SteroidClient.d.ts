@@ -1,6 +1,9 @@
+import { SteroidConnection } from '../connection/SteroidConnection.js';
 import { SteroidWallet } from '../wallet/SteroidWallet.js';
 import { SteroidTransaction } from '../transaction/SteroidTransaction.js';
 import { SteroidClientConfig, SteroidWalletConfig, ClientStats, RPCHealth, WalletInterface } from '../types/SteroidWalletTypes.js';
+import { SteroidEventMap } from '../events/SteroidEventEmitter.js';
+import type { Connection } from '@solana/web3.js';
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
  *
@@ -9,12 +12,26 @@ import { SteroidClientConfig, SteroidWalletConfig, ClientStats, RPCHealth, Walle
  * - Smart transaction handling with retries and blockhash refresh
  * - Normalized wallet error handling
  * - Production-grade reliability out of the box
+ *
+ * @example
+ * ```ts
+ * const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
+ *   connection: { fallbacks: ['https://solana-mainnet.rpc.extrnode.com'], raceNodes: 2 },
+ *   enableLogging: true,
+ * });
+ *
+ * const balance = await client.connection.getBalance(myPublicKey);
+ * ```
  */
 export declare class SteroidClient {
-    private connection;
+    /**
+     * Resilient RPC handle: forwards `Connection` methods via an internal Proxy (see SteroidConnection).
+     */
+    readonly connection: SteroidConnection & Connection;
     private transactionEngine;
     private config;
     private logger;
+    private events;
     private isDestroyed;
     /**
      * Initialize a new SteroidClient.
@@ -29,12 +46,37 @@ export declare class SteroidClient {
      * @param wallet A standard Solana wallet adapter
      * @param walletConfig Optional overrides for this specific wallet
      * @returns A SteroidWallet instance with enhanced reliability
+     *
+     * @example
+     * ```ts
+     * const steroidWallet = client.connectWallet(walletAdapter);
+     * const sig = await steroidWallet.signAndSend(transaction);
+     * ```
      */
     connectWallet(wallet: WalletInterface, walletConfig?: SteroidWalletConfig): SteroidWallet;
     /**
      * Get the underlying transaction engine for advanced use cases.
      */
     getTransactionEngine(): SteroidTransaction;
+    /**
+     * Subscribe to client events (transactions, connection, health).
+     *
+     * @example
+     * ```ts
+     * client.on('transaction:confirmed', ({ signature, durationMs }) => {
+     *   console.log(`Landed in ${durationMs}ms!`);
+     * });
+     * ```
+     */
+    on<K extends keyof SteroidEventMap>(event: K, listener: (data: SteroidEventMap[K]) => void): this;
+    /**
+     * Unsubscribe from client events.
+     */
+    off<K extends keyof SteroidEventMap>(event: K, listener: (data: SteroidEventMap[K]) => void): this;
+    /**
+     * Subscribe to a client event once.
+     */
+    once<K extends keyof SteroidEventMap>(event: K, listener: (data: SteroidEventMap[K]) => void): this;
     /**
      * Trigger a manual health check across all RPC nodes.
      */

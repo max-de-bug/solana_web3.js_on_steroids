@@ -1,10 +1,16 @@
 import { PublicKey, Transaction, VersionedTransaction, TransactionSignature } from '@solana/web3.js';
 import { SteroidConnection } from '../connection/SteroidConnection.js';
 import { WalletInterface, WalletErrorType, SteroidWalletConfig, SteroidSendOptions } from '../types/SteroidWalletTypes.js';
-export declare class WalletError extends Error {
-    type: WalletErrorType;
-    originalError?: any | undefined;
-    constructor(type: WalletErrorType, message: string, originalError?: any | undefined);
+import { SteroidError } from '../errors/index.js';
+import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
+/**
+ * Wallet-specific error that extends SteroidError for unified error handling.
+ */
+export declare class WalletError extends SteroidError {
+    readonly type: WalletErrorType;
+    constructor(type: WalletErrorType, message: string, originalError?: any);
+    private static mapTypeToCode;
+    private static getSuggestionForType;
 }
 /**
  * SteroidWallet wraps any Solana wallet adapter and provides:
@@ -19,9 +25,10 @@ export declare class SteroidWallet {
     private txEngine;
     private config;
     private logger;
+    private emitter?;
     private networkValidated;
     private genesisHash?;
-    constructor(wallet: WalletInterface, connection: SteroidConnection, config?: SteroidWalletConfig);
+    constructor(wallet: WalletInterface, connection: SteroidConnection, config?: SteroidWalletConfig, emitter?: SteroidEventEmitter);
     /**
      * Get the wallet's public key.
      */
@@ -63,7 +70,6 @@ export declare class SteroidWallet {
      * Normalizes different wallet errors into a consistent format.
      */
     private normalizeError;
-    private log;
     /**
      * Get network information.
      */

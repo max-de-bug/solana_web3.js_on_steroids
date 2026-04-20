@@ -1,5 +1,18 @@
+export declare const VERSION = "1.1.0";
 export { SteroidClient, createSteroidClient } from './client/SteroidClient.js';
 export { SteroidConnection } from './connection/SteroidConnection.js';
+export { ClusterDetector, CLUSTER_GENESIS_HASHES } from './connection/ClusterDetector.js';
+export { RpcScorer } from './connection/RpcScorer.js';
+export { WebSocketConfirmation } from './connection/WebSocketConfirmation.js';
+export type { WsConfirmationResult } from './connection/WebSocketConfirmation.js';
+export { ConnectionPool } from './connection/ConnectionPool.js';
 export { SteroidTransaction } from './transaction/SteroidTransaction.js';
 export { SteroidWallet, WalletError } from './wallet/SteroidWallet.js';
+export { ComputeBudgetOptimizer } from './compute/ComputeBudgetOptimizer.js';
+export type { ComputeBudgetEstimate, ComputeBudgetConfig } from './compute/ComputeBudgetOptimizer.js';
+export { SteroidEventEmitter } from './events/SteroidEventEmitter.js';
+export type { SteroidEventMap, SteroidEventKey, SteroidEventListener } from './events/SteroidEventEmitter.js';
+export { SteroidError, ErrorCode, ErrorCategory, ErrorTranslator } from './errors/index.js';
+export type { SteroidErrorOptions } from './errors/index.js';
 export * from './types/SteroidWalletTypes.js';
+export { validateClientConfig, validateConnectionConfig, validateEndpointUrl } from './utils/validation.js';

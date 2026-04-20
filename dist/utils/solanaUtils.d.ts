@@ -19,3 +19,20 @@ export declare function isBlockhashExpiredError(error: any): boolean;
  * Serialize transaction to bytes consistently.
  */
 export declare function serializeTransaction(transaction: Transaction | VersionedTransaction): Buffer;
+/**
+ * Get blockhash from either Legacy or Versioned transaction.
+ */
+export declare function getTransactionBlockhash(transaction: Transaction | VersionedTransaction): string | undefined;
+/**
+ * Set blockhash on either Legacy or Versioned transaction.
+ * For Versioned transactions, creates a new transaction with updated message.
+ */
+export declare function setTransactionBlockhash(transaction: Transaction | VersionedTransaction, blockhash: string, lastValidBlockHeight?: number): Transaction | VersionedTransaction;
+/**
+ * Check if a transaction has been signed.
+ */
+export declare function isTransactionSigned(transaction: Transaction | VersionedTransaction): boolean;
+/**
+ * Get last valid block height from transaction if available.
+ */
+export declare function getLastValidBlockHeight(transaction: Transaction | VersionedTransaction): number | undefined;

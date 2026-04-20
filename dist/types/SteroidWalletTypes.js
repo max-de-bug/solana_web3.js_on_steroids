@@ -8,6 +8,7 @@ export var TransactionState;
     TransactionState["FINALIZED"] = "FINALIZED";
     TransactionState["FAILED"] = "FAILED";
     TransactionState["EXPIRED"] = "EXPIRED";
+    TransactionState["ABORTED"] = "ABORTED";
 })(TransactionState || (TransactionState = {}));
 export var WalletErrorType;
 (function (WalletErrorType) {
@@ -28,6 +29,11 @@ export const DEFAULT_CONFIG = {
         healthCheckInterval: 30000,
         requestTimeout: 30000,
         enableLogging: false,
+        latencyScoring: false,
+        scoringWindow: 20,
+        raceNodes: 0,
+        maxSlotLag: 50,
+        unhealthyCooldownMs: 60000,
     },
     TRANSACTION: {
         timeoutSeconds: 60,
