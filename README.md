@@ -44,7 +44,6 @@ Automatically measures compute unit consumption via simulation and fetches netwo
 
 ## 🗺 Architecture Overview
 
-![Architecture Diagram](docs/assets/architecture.png)
 
 ### Technical Resilience Flow
 ![Technical Flow](docs/assets/architecture-diagram.svg)
