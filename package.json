@@ -1,6 +1,6 @@
 {
   "name": "solana-web3-on-steroids",
-  "version": "1.0.18",
+  "version": "1.1.0",
   "description": "A systems-grade resilience layer for Solana web3.js",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -28,6 +28,7 @@
   "scripts": {
     "build": "tsc",
     "lint": "tsc --noEmit",
+    "lint:eslint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -41,7 +42,10 @@
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-wallets": "^0.19.32",
     "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.2",
+    "@typescript-eslint/parser": "^8.58.2",
     "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.2.1",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.0",
     "vitest": "^4.0.18"

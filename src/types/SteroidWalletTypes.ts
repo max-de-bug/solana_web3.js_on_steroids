@@ -1,5 +1,4 @@
 import type {
-  Connection,
   ConnectionConfig,
   Commitment,
   PublicKey,
@@ -7,13 +6,9 @@ import type {
   VersionedTransaction,
   TransactionSignature,
   SendOptions,
-  BlockhashWithExpiryBlockHeight,
-  SignatureStatus,
 } from '@solana/web3.js';
 
-
 export type {
-  Connection,
   ConnectionConfig,
   Commitment,
   PublicKey,
@@ -21,29 +16,36 @@ export type {
   VersionedTransaction,
   TransactionSignature,
   SendOptions,
-  BlockhashWithExpiryBlockHeight,
-  SignatureStatus,
 };
 
+/**
+ * Configuration for SteroidConnection resilience behaviour.
+ */
 export interface SteroidConnectionConfig extends ConnectionConfig {
-      fallbacks?: string[];
-      maxRetries?: number;
-      retryDelay?: number;
-      healthCheckInterval?: number;
-      requestTimeout?: number;
-      enableLogging?: boolean;
-      /** Enable performance-based RPC selection (default: false) */
-      latencyScoring?: boolean;
-      /** Number of requests to consider for scoring (default: 20) */
-      scoringWindow?: number;
-      /** Expected cluster for validation. Emits warning if mismatch. */
-      expectedCluster?: ClusterType;
-      /** Number of nodes to race for critical requests (default: 0 = disabled) */
-      raceNodes?: number;
-      /** Maximum allowed slot lag before a node is penalized (default: 50) */
-      maxSlotLag?: number;
-      /** Cooldown period after a node is marked unhealthy (default: 60000ms) */
-      unhealthyCooldownMs?: number;
+  /** Additional RPC endpoint URLs to use as fallbacks */
+  fallbacks?: string[];
+  /** Maximum retry attempts per request (default: 5) */
+  maxRetries?: number;
+  /** Base delay between retries in ms (default: 500) */
+  retryDelay?: number;
+  /** Interval between background health checks in ms (default: 30000). 0 = disabled */
+  healthCheckInterval?: number;
+  /** Per-request timeout in ms (default: 30000) */
+  requestTimeout?: number;
+  /** Enable internal diagnostic logging (default: false) */
+  enableLogging?: boolean;
+  /** Enable performance-based RPC selection via EMA latency scoring (default: false) */
+  latencyScoring?: boolean;
+  /** Number of recent requests to consider for scoring (default: 20) */
+  scoringWindow?: number;
+  /** Expected cluster for validation. Emits warning on mismatch */
+  expectedCluster?: ClusterType;
+  /** Number of nodes to race for critical requests (default: 0 = disabled) */
+  raceNodes?: number;
+  /** Maximum allowed slot lag before a node is penalised (default: 50) */
+  maxSlotLag?: number;
+  /** Cooldown period after a node is marked unhealthy in ms (default: 60000) */
+  unhealthyCooldownMs?: number;
 }
 
 export interface RPCHealth {

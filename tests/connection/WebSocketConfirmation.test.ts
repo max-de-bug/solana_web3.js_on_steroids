@@ -12,7 +12,7 @@ describe('WebSocketConfirmation', () => {
     };
   });
 
-  it('should confirm signature successfully', async () => {
+  it('should return "confirmed" on successful signature confirmation', async () => {
     mockConnection.onSignature.mockImplementation((sig: string, callback: Function) => {
       // Simulate success callback after a short delay
       setTimeout(() => callback({ err: null }, {}), 10);
@@ -21,12 +21,12 @@ describe('WebSocketConfirmation', () => {
 
     const result = await WebSocketConfirmation.confirmSignature(mockConnection, mockSignature, 'confirmed', 1000);
     
-    expect(result).toBe(true);
+    expect(result).toBe('confirmed');
     expect(mockConnection.onSignature).toHaveBeenCalledWith(mockSignature, expect.any(Function), 'confirmed');
     expect(mockConnection.removeSignatureListener).toHaveBeenCalledWith(123);
   });
 
-  it('should return false on transaction error', async () => {
+  it('should return "error" on transaction error', async () => {
     mockConnection.onSignature.mockImplementation((sig: string, callback: Function) => {
       setTimeout(() => callback({ err: 'SomeError' }, {}), 10);
       return 123;
@@ -34,26 +34,55 @@ describe('WebSocketConfirmation', () => {
 
     const result = await WebSocketConfirmation.confirmSignature(mockConnection, mockSignature, 'confirmed', 1000);
     
-    expect(result).toBe(false);
+    expect(result).toBe('error');
     expect(mockConnection.removeSignatureListener).toHaveBeenCalledWith(123);
   });
 
-  it('should return false on timeout', async () => {
+  it('should return "timeout" on timeout', async () => {
     mockConnection.onSignature.mockReturnValue(123);
 
     const result = await WebSocketConfirmation.confirmSignature(mockConnection, mockSignature, 'confirmed', 50);
     
-    expect(result).toBe(false);
+    expect(result).toBe('timeout');
     expect(mockConnection.removeSignatureListener).toHaveBeenCalledWith(123);
   });
 
-  it('should handle subscription errors', async () => {
+  it('should return "timeout" on subscription errors', async () => {
     mockConnection.onSignature.mockImplementation(() => {
       throw new Error('Subscription failed');
     });
 
     const result = await WebSocketConfirmation.confirmSignature(mockConnection, mockSignature, 'confirmed', 1000);
     
-    expect(result).toBe(false);
+    expect(result).toBe('timeout');
+  });
+
+  describe('isConfirmed (backwards-compatible helper)', () => {
+    it('should return true when result is "confirmed"', async () => {
+      mockConnection.onSignature.mockImplementation((sig: string, callback: Function) => {
+        setTimeout(() => callback({ err: null }, {}), 10);
+        return 123;
+      });
+
+      const result = await WebSocketConfirmation.isConfirmed(mockConnection, mockSignature, 'confirmed', 1000);
+      expect(result).toBe(true);
+    });
+
+    it('should return false when result is "error"', async () => {
+      mockConnection.onSignature.mockImplementation((sig: string, callback: Function) => {
+        setTimeout(() => callback({ err: 'SomeError' }, {}), 10);
+        return 123;
+      });
+
+      const result = await WebSocketConfirmation.isConfirmed(mockConnection, mockSignature, 'confirmed', 1000);
+      expect(result).toBe(false);
+    });
+
+    it('should return false when result is "timeout"', async () => {
+      mockConnection.onSignature.mockReturnValue(123);
+
+      const result = await WebSocketConfirmation.isConfirmed(mockConnection, mockSignature, 'confirmed', 50);
+      expect(result).toBe(false);
+    });
   });
 });

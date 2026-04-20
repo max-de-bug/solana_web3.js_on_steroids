@@ -251,7 +251,7 @@ describe('SteroidTransaction', () => {
     it('should fall back to polling if WebSocket fails', async () => {
       // Mock WebSocket confirmation to fail
       const { WebSocketConfirmation } = await import('../../src/connection/WebSocketConfirmation.js');
-      vi.spyOn(WebSocketConfirmation, 'confirmSignature').mockResolvedValue(false);
+      vi.spyOn(WebSocketConfirmation, 'confirmSignature').mockResolvedValue('timeout');
       
       const tx = createTestTransaction();
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

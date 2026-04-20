@@ -5,6 +5,7 @@ import { SteroidEventEmitter } from '../events/SteroidEventEmitter.js';
 import { ErrorTranslator, SteroidError } from '../errors/index.js';
 import { RpcScorer } from './RpcScorer.js';
 import { ClusterDetector } from './ClusterDetector.js';
+import { ConnectionPool } from './ConnectionPool.js';
 
 /**
  * SteroidConnection uses a Proxy pattern to wrap a real @solana/web3.js Connection.
@@ -36,6 +37,7 @@ export class SteroidConnection {
   private logger: Logger;
   private emitter?: SteroidEventEmitter;
   private scorer?: RpcScorer;
+  private connectionPool: ConnectionPool;
   private detectedCluster: ClusterType = 'unknown';
   private genesisHash: string = '';
 
@@ -56,6 +58,7 @@ export class SteroidConnection {
       unhealthyCooldownMs: config.unhealthyCooldownMs ?? 60000,
     };
     this.logger = new Logger('SteroidConnection', this.steroidConfig.enableLogging);
+    this.connectionPool = new ConnectionPool(config);
 
     if (this.steroidConfig.latencyScoring) {
       this.scorer = new RpcScorer(this.steroidConfig.scoringWindow);
@@ -145,7 +148,7 @@ export class SteroidConnection {
 
     const racePromises = topIndices.map(async (idx) => {
         const url = this.urls[idx];
-        const tempConn = idx === this.currentUrlIndex ? this.activeConnection : new Connection(url, this.config);
+        const tempConn = idx === this.currentUrlIndex ? this.activeConnection : this.connectionPool.get(url);
         const startTime = Date.now();
         
         try {
@@ -457,7 +460,7 @@ export class SteroidConnection {
   private async checkNodeHealth(url: string): Promise<void> {
     const startTime = Date.now();
     try {
-      const tempConn = new Connection(url, { commitment: 'confirmed' });
+      const tempConn = this.connectionPool.get(url);
       
       // We use getSlot as a lightweight "ping"
       const slot = await this.callWithTimeout(
@@ -498,6 +501,7 @@ export class SteroidConnection {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = undefined;
     }
+    this.connectionPool.clear();
   }
 
   /**

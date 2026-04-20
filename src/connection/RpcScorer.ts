@@ -1,19 +1,34 @@
 import { RPCHealth } from '../types/SteroidWalletTypes.js';
 
+/**
+ * Tracks per-node RPC metrics: latency (via running EMA), success rate, and slot lag.
+ * Provides a composite score for intelligent node selection.
+ *
+ * Key optimization: latency EMA is updated incrementally on each `recordSuccess()` call
+ * instead of being recalculated from the full history window every time `getScore()` is invoked.
+ */
 export class RpcScorer {
-  private latencyHistory: Map<string, number[]> = new Map();
+  /** Running EMA latency per URL */
+  private emaLatency: Map<string, number> = new Map();
+  /** Sliding window of success/failure flags (0 = success, 1 = failure) */
   private errorHistory: Map<string, number[]> = new Map();
+  /** Latest reported slot per URL */
   private slotHistory: Map<string, number> = new Map();
+  /** Maximum slot observed across all URLs */
   private maxClusterSlot: number = 0;
+  /** Number of successful request samples recorded per URL */
+  private sampleCount: Map<string, number> = new Map();
+
   private readonly windowSize: number;
-  private readonly alpha = 0.3; // Smoothing factor for EMA (0.3 = 30% weight to new value)
+  /** Smoothing factor for EMA (0.3 = 30% weight to new value) */
+  private readonly alpha = 0.3;
 
   constructor(windowSize: number = 20) {
     this.windowSize = windowSize;
   }
 
   /**
-   * Records the current slot for a given URL and updates the cluster maximum.
+   * Records the current slot for a given URL and updates the cluster-wide maximum.
    */
   public recordSlot(url: string, slot: number): void {
     this.slotHistory.set(url, slot);
@@ -24,77 +39,64 @@ export class RpcScorer {
 
   /**
    * Records a successful request latency for a given URL.
+   * Updates the running EMA incrementally — O(1) per call.
    */
   public recordSuccess(url: string, latency: number): void {
-    let history = this.latencyHistory.get(url) || [];
-    history.push(latency);
-    if (history.length > this.windowSize) {
-      history.shift();
-    }
-    this.latencyHistory.set(url, history);
+    const currentEma = this.emaLatency.get(url);
+    const newEma = currentEma === undefined
+      ? latency
+      : this.alpha * latency + (1 - this.alpha) * currentEma;
+    this.emaLatency.set(url, newEma);
 
-    // Also record a 0 in error history for success
-    let errHistory = this.errorHistory.get(url) || [];
-    errHistory.push(0);
-    if (errHistory.length > this.windowSize) {
-      errHistory.shift();
-    }
-    this.errorHistory.set(url, errHistory);
+    this.sampleCount.set(url, (this.sampleCount.get(url) ?? 0) + 1);
+
+    // Record a 0 (success) in the error sliding window
+    this.pushErrorSample(url, 0);
   }
 
   /**
    * Records a failed request for a given URL.
    */
   public recordFailure(url: string): void {
-    let errHistory = this.errorHistory.get(url) || [];
-    errHistory.push(1);
-    if (errHistory.length > this.windowSize) {
-      errHistory.shift();
-    }
-    this.errorHistory.set(url, errHistory);
+    this.pushErrorSample(url, 1);
   }
 
   /**
-   * Calculates the score for all URLs and returns the best one.
-   * Score = (1 / EMA_Latency) * (SuccessRate^2) * (1 / (1 + SlotLag))
+   * Calculates the composite score for a specific URL.
+   *
+   * Formula: `(1000 / EMA_Latency) × SuccessRate² × LagPenalty`
+   *
+   * - **1000 / EMA_Latency**: Normalises latency so higher is better.
+   * - **SuccessRate²**: Heavily penalises nodes with even a few recent errors.
+   * - **LagPenalty**: Exponential decay when slot lag exceeds the threshold.
    */
   public getScore(url: string, maxSlotLag: number = 50): number {
-    const latencyHistory = this.latencyHistory.get(url) || [];
-    const errorHistory = this.errorHistory.get(url) || [];
-    const lastSlot = this.slotHistory.get(url) || 0;
+    const ema = this.emaLatency.get(url);
+    const samples = this.sampleCount.get(url) ?? 0;
 
-    if (latencyHistory.length === 0) return 0;
+    // No data yet — unable to score
+    if (ema === undefined || samples === 0) return 0;
 
-    // Calculate Latency EMA
-    let ema = latencyHistory[0];
-    for (let i = 1; i < latencyHistory.length; i++) {
-      ema = this.alpha * latencyHistory[i] + (1 - this.alpha) * ema;
-    }
+    // Success rate from sliding window
+    const errorWindow = this.errorHistory.get(url) ?? [];
+    const failures = errorWindow.reduce((sum, val) => sum + val, 0);
+    const successRate = 1 - (failures / (errorWindow.length || 1));
 
-    // Calculate Success Rate
-    const failures = errorHistory.reduce((sum, val) => sum + val, 0);
-    const successRate = 1 - (failures / (errorHistory.length || 1));
-
-    // Calculate Slot Lag Penalty
+    // Slot lag penalty
+    const lastSlot = this.slotHistory.get(url) ?? 0;
     const lag = Math.max(0, this.maxClusterSlot - lastSlot);
-    // If lag exceeds threshold, apply exponential penalty
     const lagPenalty = lag > maxSlotLag ? Math.pow(0.5, (lag - maxSlotLag) / 10) : 1;
 
-    // Calculate Score
-    // We use successRate^2 to heavily penalize nodes with even a few errors
-    // We use 1000/ema to normalize latency into a human-readable scale where higher is better
-    const score = (1000 / (ema || 1)) * Math.pow(successRate, 2) * lagPenalty;
-    
-    return score;
+    return (1000 / (ema || 1)) * Math.pow(successRate, 2) * lagPenalty;
   }
 
   /**
    * Picks the best healthy RPC node from the list based on scores.
-   * If scores are tied or missing, falls back to original order.
+   * If scores are tied or missing, falls back to the original order.
    */
   public getBestUrlIndex(
-    urls: string[], 
-    healthMap: Map<string, RPCHealth>, 
+    urls: string[],
+    healthMap: Map<string, RPCHealth>,
     excludeIndices: Set<number> = new Set(),
     maxSlotLag: number = 50
   ): number {
@@ -102,23 +104,39 @@ export class RpcScorer {
     let maxScore = -1;
 
     for (let i = 0; i < urls.length; i++) {
-        if (excludeIndices.has(i)) continue;
-        
-        const url = urls[i];
-        const health = healthMap.get(url);
-        
-        // Only consider healthy nodes
-        if (!health || !health.healthy) continue;
+      if (excludeIndices.has(i)) continue;
 
-        const score = this.getScore(url, maxSlotLag);
-        
-        // If we haven't found any node yet, or this node has a better score
-        if (bestIndex === -1 || score > maxScore) {
-            bestIndex = i;
-            maxScore = score;
-        }
+      const url = urls[i];
+      const health = healthMap.get(url);
+
+      // Only consider healthy nodes
+      if (!health || !health.healthy) continue;
+
+      const score = this.getScore(url, maxSlotLag);
+
+      if (bestIndex === -1 || score > maxScore) {
+        bestIndex = i;
+        maxScore = score;
+      }
     }
 
     return bestIndex;
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────
+
+  /**
+   * Pushes a sample into the sliding error window, evicting the oldest entry when full.
+   */
+  private pushErrorSample(url: string, value: number): void {
+    let history = this.errorHistory.get(url);
+    if (!history) {
+      history = [];
+      this.errorHistory.set(url, history);
+    }
+    history.push(value);
+    if (history.length > this.windowSize) {
+      history.shift();
+    }
   }
 }

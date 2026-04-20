@@ -105,10 +105,9 @@ export class SteroidTransaction {
             ? mergedOptions.computeBudget 
             : {};
         
-        // ComputeBudgetOptimizer now supports both Legacy and Versioned
-        const estimate = await this.computeOptimizer.estimateComputeBudget(transaction, budgetConfig);
-        computeUnitsEstimated = estimate.computeUnits;
+        // applyComputeBudget internally estimates, avoiding a redundant simulation RPC call
         transaction = await this.computeOptimizer.applyComputeBudget(transaction, budgetConfig);
+        computeUnitsEstimated = this.computeOptimizer.lastEstimate?.computeUnits;
       }
 
       // 1. Simulation with detailed error parsing
@@ -221,17 +220,28 @@ export class SteroidTransaction {
           if (useWebSocket) {
             wsWaitStart = Date.now();
             this.logger.info(`Attempting WebSocket confirmation for ${signature}...`);
-            confirmed = await WebSocketConfirmation.confirmSignature(
+            const wsResult = await WebSocketConfirmation.confirmSignature(
               this.connection as unknown as Connection,
               signature,
               confirmationCommitment,
               retryInterval // Use retryInterval as the WS wait time before falling back or retrying
             );
             
-            if (confirmed) {
+            if (wsResult === 'confirmed') {
+              confirmed = true;
               this.logger.info(`Transaction confirmed via WebSocket: ${signature}`);
+            } else if (wsResult === 'error') {
+              // Transaction landed on-chain but failed — no point retrying
+              this.logger.error(`Transaction failed on-chain (WebSocket): ${signature}`);
+              throw new SteroidError({
+                code: ErrorCode.SIMULATION_FAILED,
+                category: ErrorCategory.TRANSACTION,
+                userMessage: 'Transaction failed on-chain',
+                suggestion: 'Check your balances and transaction parameters, then try again',
+                context: { signature },
+              });
             } else {
-              this.logger.warn(`WebSocket confirmation failed or timed out for ${signature}, falling back to multi-node polling...`);
+              this.logger.warn(`WebSocket confirmation timed out for ${signature}, falling back to multi-node polling...`);
             }
           }
 

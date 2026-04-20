@@ -62,10 +62,19 @@ export class ComputeBudgetOptimizer {
   private logger: Logger;
   private feeCache: { fee: number; timestamp: number } | null = null;
   private static readonly FEE_CACHE_TTL_MS = 10000; // 10 seconds cache
+  private _lastEstimate: ComputeBudgetEstimate | null = null;
 
   constructor(connection: SteroidConnection, enableLogging: boolean = false) {
     this.connection = connection;
     this.logger = new Logger('ComputeBudgetOptimizer', enableLogging);
+  }
+
+  /**
+   * Returns the most recent compute budget estimate, or null if none has been performed.
+   * Useful for retrieving CU data after calling `applyComputeBudget()` without a redundant simulation.
+   */
+  get lastEstimate(): ComputeBudgetEstimate | null {
+    return this._lastEstimate;
   }
 
   /**
@@ -105,11 +114,14 @@ export class ComputeBudgetOptimizer {
       `priority: ${priorityFee} microLamports/CU, total fee: ${totalFee} lamports`
     );
 
-    return {
+    const estimate: ComputeBudgetEstimate = {
       computeUnits: computeUnitsWithMargin,
       priorityFee,
       totalFee,
     };
+
+    this._lastEstimate = estimate;
+    return estimate;
   }
 
   /**

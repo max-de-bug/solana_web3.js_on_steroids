@@ -11,18 +11,29 @@ import {
   DEFAULT_CONFIG
 } from '../types/SteroidWalletTypes.js';
 import { Logger } from '../utils/index.js';
+import { validateClientConfig, validateEndpointUrl } from '../utils/validation.js';
 import { SteroidEventEmitter, SteroidEventMap } from '../events/SteroidEventEmitter.js';
 import { SteroidError, ErrorCode, ErrorCategory } from '../errors/index.js';
 import type { Connection } from '@solana/web3.js';
 
 /**
  * SteroidClient is the main entry point for the Wallet UX Reliability Layer.
- * 
+ *
  * Features:
  * - Resilient RPC connections with automatic failover
  * - Smart transaction handling with retries and blockhash refresh
  * - Normalized wallet error handling
  * - Production-grade reliability out of the box
+ *
+ * @example
+ * ```ts
+ * const client = new SteroidClient('https://api.mainnet-beta.solana.com', {
+ *   connection: { fallbacks: ['https://solana-mainnet.rpc.extrnode.com'], raceNodes: 2 },
+ *   enableLogging: true,
+ * });
+ *
+ * const balance = await client.connection.getBalance(myPublicKey);
+ * ```
  */
 export class SteroidClient {
   /**
@@ -42,10 +53,18 @@ export class SteroidClient {
    * @param config Optional configuration for connection and wallet behavior
    */
   constructor(endpoint: string | string[], config: SteroidClientConfig = {}) {
+    // Validate config at construction time
+    validateClientConfig(config);
+
     this.config = config;
     
     // Initialize resilient connection
     const endpoints = Array.isArray(endpoint) ? endpoint : [endpoint];
+    if (endpoints.length === 0) {
+      throw new TypeError('At least one endpoint URL must be provided');
+    }
+    endpoints.forEach(validateEndpointUrl);
+
     const [primary, ...additionalFallbacks] = endpoints;
 
     const connectionConfig: SteroidConnectionConfig = {
@@ -69,10 +88,16 @@ export class SteroidClient {
 
   /**
    * Connect a wallet to the Steroid reliability layer.
-   * 
+   *
    * @param wallet A standard Solana wallet adapter
    * @param walletConfig Optional overrides for this specific wallet
    * @returns A SteroidWallet instance with enhanced reliability
+   *
+   * @example
+   * ```ts
+   * const steroidWallet = client.connectWallet(walletAdapter);
+   * const sig = await steroidWallet.signAndSend(transaction);
+   * ```
    */
   public connectWallet(
     wallet: WalletInterface,
@@ -100,6 +125,13 @@ export class SteroidClient {
 
   /**
    * Subscribe to client events (transactions, connection, health).
+   *
+   * @example
+   * ```ts
+   * client.on('transaction:confirmed', ({ signature, durationMs }) => {
+   *   console.log(`Landed in ${durationMs}ms!`);
+   * });
+   * ```
    */
   public on<K extends keyof SteroidEventMap>(
     event: K,
