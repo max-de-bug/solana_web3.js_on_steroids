@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-06-10
+
+### Changed
+- **Updated documentation** — README.md overhaul with complete up-to-date API reference, new `docs/api-reference.md` and `docs/upgrading.md` guides.
+- Removed outdated architecture diagram from README (diagram still available in `docs/assets/`).
+
 ## [1.1.0] — 2026-04-20
 
 ### Added
